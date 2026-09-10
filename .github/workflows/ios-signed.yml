@@ -1,0 +1,127 @@
+name: Signed iOS IPA
+
+on:
+  workflow_dispatch:
+    inputs:
+      distribution:
+        description: Distribution profile type
+        type: choice
+        default: app-store-connect
+        options:
+          - app-store-connect
+          - release-testing
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-signed-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Sign and export iPhone app
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+      DISTRIBUTION: ${{ inputs.distribution }}
+      IOS_BUNDLE_ID: ${{ vars.IOS_BUNDLE_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate signing configuration
+        env:
+          IOS_CERTIFICATE_BASE64: ${{ secrets.IOS_CERTIFICATE_BASE64 }}
+          IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+          IOS_PROFILE_BASE64: ${{ secrets.IOS_PROFILE_BASE64 }}
+        run: |
+          for name in IOS_CERTIFICATE_BASE64 IOS_CERTIFICATE_PASSWORD IOS_PROFILE_BASE64 IOS_BUNDLE_ID; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Missing $name. Follow docs/ios-github-actions.md."
+              exit 1
+            fi
+          done
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.4'
+          channel: stable
+          cache: true
+      - run: flutter pub get --enforce-lockfile
+      - run: flutter analyze
+      - run: flutter test
+      - name: Install distribution certificate and provisioning profile
+        env:
+          IOS_CERTIFICATE_BASE64: ${{ secrets.IOS_CERTIFICATE_BASE64 }}
+          IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+          IOS_PROFILE_BASE64: ${{ secrets.IOS_PROFILE_BASE64 }}
+        run: |
+          set -euo pipefail
+          umask 077
+          SIGNING_DIR="$RUNNER_TEMP/rihla-signing"
+          mkdir -p "$SIGNING_DIR"
+          echo "SIGNING_DIR=$SIGNING_DIR" >> "$GITHUB_ENV"
+          printf '%s' "$IOS_CERTIFICATE_BASE64" | base64 --decode > "$SIGNING_DIR/certificate.p12"
+          printf '%s' "$IOS_PROFILE_BASE64" | base64 --decode > "$SIGNING_DIR/profile.mobileprovision"
+          security cms -D -i "$SIGNING_DIR/profile.mobileprovision" > "$SIGNING_DIR/profile.plist"
+          python3 scripts/prepare_ios_signing.py "$SIGNING_DIR/profile.plist" "$SIGNING_DIR/ExportOptions.plist"
+          # The keychain password is ephemeral and is never written to the repository.
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 32)"
+          KEYCHAIN_PATH="$SIGNING_DIR/build.keychain-db"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$SIGNING_DIR/certificate.p12" -P "$IOS_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN_PATH" "$HOME/Library/Keychains/login.keychain-db"
+          PROFILE_UUID="$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$SIGNING_DIR/profile.plist")"
+          PROFILE_DIR="$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"
+          mkdir -p "$PROFILE_DIR"
+          cp "$SIGNING_DIR/profile.mobileprovision" "$PROFILE_DIR/$PROFILE_UUID.mobileprovision"
+          echo "INSTALLED_PROFILE=$PROFILE_DIR/$PROFILE_UUID.mobileprovision" >> "$GITHUB_ENV"
+      - name: Configure Flutter release
+        run: |
+          # Keep reruns distinct for App Store Connect.
+          BUILD_NUMBER="$GITHUB_RUN_NUMBER.$GITHUB_RUN_ATTEMPT"
+          flutter build ios --config-only --release --no-codesign --build-number="$BUILD_NUMBER"
+      - name: Archive signed app
+        run: |
+          set -euo pipefail
+          xcodebuild -workspace ios/Runner.xcworkspace -scheme Runner \
+            -configuration Release -destination 'generic/platform=iOS' \
+            -archivePath build/ios/archive/Runner.xcarchive \
+            DEVELOPMENT_TEAM="$IOS_TEAM_ID" \
+            PRODUCT_BUNDLE_IDENTIFIER="$IOS_BUNDLE_ID" \
+            CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY='Apple Distribution' \
+            PROVISIONING_PROFILE_SPECIFIER="$IOS_PROFILE_UUID" \
+            archive
+      - name: Export IPA
+        run: |
+          xcodebuild -exportArchive \
+            -archivePath build/ios/archive/Runner.xcarchive \
+            -exportOptionsPlist "$SIGNING_DIR/ExportOptions.plist" \
+            -exportPath build/ios/ipa
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rihla-ios-${{ inputs.distribution }}-${{ github.run_number }}-${{ github.run_attempt }}
+          path: build/ios/ipa/*.ipa
+          if-no-files-found: error
+          retention-days: 7
+      - name: Distribution instructions
+        run: |
+          if [[ "$DISTRIBUTION" == 'app-store-connect' ]]; then
+            echo 'Signed IPA exported for App Store Connect. TestFlight upload is a separate step; no app has been published by this workflow.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Signed IPA exported for devices registered in the provisioning profile. Downloading an IPA in Safari alone does not install it.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Remove signing material
+        if: always()
+        run: |
+          if [[ -n "${SIGNING_DIR:-}" && "$SIGNING_DIR" == "$RUNNER_TEMP/rihla-signing" ]]; then
+            security delete-keychain "$SIGNING_DIR/build.keychain-db" 2>/dev/null || true
+            rm -rf -- "$SIGNING_DIR"
+          fi
+          if [[ -n "${INSTALLED_PROFILE:-}" && "$INSTALLED_PROFILE" == "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles/"* ]]; then
+            rm -f -- "$INSTALLED_PROFILE"
+          fi
