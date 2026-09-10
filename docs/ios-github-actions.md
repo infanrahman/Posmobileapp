@@ -31,7 +31,7 @@ In **GitHub repository → Settings → Secrets and variables → Actions**, add
 
 Add these values directly to GitHub Secrets; do not put certificate contents or passwords in chat, source files or commits. The helper reads the team ID and profile UUID from the profile and validates its expiry, App ID and distribution type. The workflow uses a temporary keychain, cleans up signing material and saves only the IPA artifact.
 
-The current source bundle ID is `com.rihla.rihlaPos`. The signed workflow overrides it with `IOS_BUNDLE_ID`; the Apple profile must match the configured value exactly.
+The source bundle ID is `com.infanrahman.posmobileapp`. Register this explicit App ID in Apple Developer and set `IOS_BUNDLE_ID` to the same value. The Apple profile must match it exactly.
 
 Choose one distribution method:
 
