@@ -8,9 +8,9 @@ Push the project to the GitHub repository. **Actions → Mobile builds** runs on
 
 1. Formatting, Flutter analysis, database/UI tests and signing-helper tests.
 2. An Android debug APK, saved as `rihla-android-test-…`.
-3. An unsigned iOS device compilation, saved as `rihla-ios-UNSIGNED-…`.
+3. An unsigned iOS IPA, saved as `rihla-ios-UNSIGNED-…`.
 
-The unsigned artifact proves the app compiles. It is **not installable on your iPhone**. It is a ZIP of an unsigned `.app`, not a signed `.ipa`.
+The unsigned artifact is a correctly packaged `.ipa`, but it has no Apple signature. It cannot be installed directly. It can be signed on Windows with a sideloading tool and an Apple account, or replaced by the signed workflow output after paid-program signing is configured. Free Apple-account signatures commonly require frequent renewal; Apple controls those limits.
 
 The workflows pin Flutter 3.44.4 and select Xcode 26.3 on `macos-15`. GitHub runner images change over time; check the [runner software list](https://github.com/actions/runner-images/blob/main/images/macos/macos-15-Readme.md) if the selected Xcode is later removed. macOS jobs use your GitHub Actions allowance according to the repository/account plan.
 

@@ -76,13 +76,15 @@ jobs:
       - run: xcodebuild -version
       - run: flutter pub get --enforce-lockfile
       - run: flutter build ios --release --no-codesign
-      - name: Package unsigned app
+      - name: Package unsigned IPA
         run: |
-          ditto -c -k --sequesterRsrc --keepParent build/ios/iphoneos/Runner.app build/ios/rihla-unsigned.app.zip
-          echo 'Unsigned compile artifact only. It cannot be installed on an iPhone. Use the Signed iOS IPA workflow for device distribution.' >> "$GITHUB_STEP_SUMMARY"
+          mkdir -p build/ios/ipa/Payload
+          cp -R build/ios/iphoneos/Runner.app build/ios/ipa/Payload/
+          (cd build/ios/ipa && ditto -c -k --sequesterRsrc --keepParent Payload rihla-unsigned.ipa)
+          echo 'This is an unsigned IPA. Sign it with an Apple account using a sideloading tool, or use the Signed iOS IPA workflow with an active paid Apple Developer Program membership.' >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
           name: rihla-ios-UNSIGNED-${{ github.run_number }}
-          path: build/ios/rihla-unsigned.app.zip
+          path: build/ios/ipa/rihla-unsigned.ipa
           if-no-files-found: error
           retention-days: 14
