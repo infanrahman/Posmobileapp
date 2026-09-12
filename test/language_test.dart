@@ -1,5 +1,8 @@
 import 'dart:io';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rihla_pos/main.dart';
 import 'package:rihla_pos/store.dart';
@@ -21,13 +24,25 @@ void main() {
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
       late PosStore store;
+      final previewKey = GlobalKey();
       await tester.runAsync(() async {
+        await (FontLoader(
+          'Amiri',
+        )..addFont(rootBundle.load('assets/fonts/Amiri-Regular.ttf'))).load();
+        await (FontLoader(
+          'MaterialIcons',
+        )..addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf'))).load();
         store = await PosStore.open(
           factory: databaseFactoryFfi,
           path: inMemoryDatabasePath,
         );
         await store.addProduct('Sales', 'A01', 100, 4, 'shop');
-        await tester.pumpWidget(RihlaApp(store: store));
+        await tester.pumpWidget(
+          RepaintBoundary(
+            key: previewKey,
+            child: RihlaApp(store: store),
+          ),
+        );
         await Future<void>.delayed(const Duration(milliseconds: 300));
       });
       Future<void> tap(String label) async {
@@ -39,6 +54,22 @@ void main() {
           await Future<void>.delayed(const Duration(milliseconds: 200));
         });
         await tester.pumpAndSettle();
+      }
+
+      Future<void> capture(String name) async {
+        if (Platform.environment['RIHLA_ARABIC_PREVIEW'] != '1') return;
+        final boundary =
+            previewKey.currentContext!.findRenderObject()!
+                as RenderRepaintBoundary;
+        await tester.runAsync(() async {
+          final image = await boundary.toImage(pixelRatio: 2);
+          final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+          await Directory('build/arabic-preview').create(recursive: true);
+          await File(
+            'build/arabic-preview/$name.png',
+          ).writeAsBytes(bytes!.buffer.asUint8List());
+          image.dispose();
+        });
       }
 
       await tester.pumpAndSettle();
@@ -53,13 +84,19 @@ void main() {
         TextDirection.rtl,
       );
       expect(tester.takeException(), isNull);
+      await capture('more');
       await tap('المخزون');
       expect(find.text('Sales'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
       await tester.runAsync(() async {
         expect((await store.settings())['language'], 'ar');
-        await tester.pumpWidget(RihlaApp(store: store));
+        await tester.pumpWidget(
+          RepaintBoundary(
+            key: previewKey,
+            child: RihlaApp(store: store),
+          ),
+        );
         await Future<void>.delayed(const Duration(milliseconds: 300));
       });
       await tester.pumpAndSettle();
@@ -68,6 +105,7 @@ void main() {
       await tap('النسخ الاحتياطي والاستعادة');
       expect(find.text('حفظ نسخة احتياطية'), findsOneWidget);
       expect(tester.takeException(), isNull);
+      await capture('backup');
       await tester.pumpWidget(const SizedBox());
       await tester.runAsync(() => store.db.close());
     },
