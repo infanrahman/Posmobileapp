@@ -1,9 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:printing/printing.dart';
+import 'backup.dart';
+import 'l10n.dart';
+import 'invoice_pdf.dart';
 import 'store.dart';
 
 part 'sale_screen.dart';
 part 'operations_screens.dart';
+part 'backup_screen.dart';
+
+const appVersion = '0.3.0';
 
 const ink = Color(0xFF172D36);
 const teal = Color(0xFF087F72);
@@ -19,14 +28,30 @@ void main() {
   runApp(const RihlaApp());
 }
 
-class RihlaApp extends StatelessWidget {
+class RihlaApp extends StatefulWidget {
   final PosStore? store;
   const RihlaApp({super.key, this.store});
+  @override
+  State<RihlaApp> createState() => _RihlaAppState();
+}
+
+class _RihlaAppState extends State<RihlaApp> {
+  Locale locale = const Locale('en');
+  void changeLanguage(String language) {
+    if (locale.languageCode != language && mounted) {
+      setState(() => locale = Locale(language));
+    }
+  }
+
   @override
   Widget build(BuildContext context) => MaterialApp(
     title: 'Rihla • Offline POS',
     debugShowCheckedModeBanner: false,
+    locale: locale,
+    supportedLocales: const [Locale('en'), Locale('ar')],
+    localizationsDelegates: GlobalMaterialLocalizations.delegates,
     theme: ThemeData(
+      fontFamily: locale.languageCode == 'ar' ? 'Amiri' : null,
       useMaterial3: true,
       scaffoldBackgroundColor: canvas,
       colorScheme: ColorScheme.fromSeed(
@@ -85,13 +110,14 @@ class RihlaApp extends StatelessWidget {
         ),
       ),
     ),
-    home: Home(initialStore: store),
+    home: Home(initialStore: widget.store, onLanguageChanged: changeLanguage),
   );
 }
 
 class Home extends StatefulWidget {
   final PosStore? initialStore;
-  const Home({super.key, this.initialStore});
+  final ValueChanged<String>? onLanguageChanged;
+  const Home({super.key, this.initialStore, this.onLanguageChanged});
   @override
   State<Home> createState() => _HomeState();
 }
@@ -104,6 +130,7 @@ class _HomeState extends State<Home> {
   int page = 0;
   String? failure;
   bool loading = true;
+  bool exportingPdf = false;
   final searchController = TextEditingController();
   @override
   void initState() {
@@ -137,6 +164,7 @@ class _HomeState extends State<Home> {
     final s = await store!.sales();
     final prefs = await store!.settings();
     if (mounted) {
+      widget.onLanguageChanged?.call(prefs['language'] ?? 'en');
       setState(() {
         products = p;
         customers = c;
@@ -156,8 +184,9 @@ class _HomeState extends State<Home> {
   bool matches(DbRow row, List<String> fields) => fields.any(
     (key) => '${row[key]}'.toLowerCase().contains(search.toLowerCase()),
   );
-  void toast(String text) =>
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+  void toast(String text) => ScaffoldMessenger.of(
+    context,
+  ).showSnackBar(SnackBar(content: UiText(text)));
   Future<void> newSale() async {
     await Navigator.of(context).push(
       MaterialPageRoute(
@@ -184,11 +213,11 @@ class _HomeState extends State<Home> {
                 children: [
                   const Icon(Icons.storage_rounded, size: 48, color: teal),
                   const SizedBox(height: 16),
-                  const Text('Could not open your local data'),
-                  Text(failure!),
+                  const UiText('Could not open your local data'),
+                  UiText(failure!),
                   FilledButton(
                     onPressed: initialize,
-                    child: const Text('Try again'),
+                    child: const UiText('Try again'),
                   ),
                 ],
               ),
@@ -210,12 +239,17 @@ class _HomeState extends State<Home> {
               child: const Icon(Icons.route_rounded, color: Colors.white),
             ),
             const SizedBox(width: 10),
-            const Text(
-              'rihla',
-              style: TextStyle(
-                fontSize: 27,
-                fontWeight: FontWeight.w800,
-                letterSpacing: -1,
+            const Flexible(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  'rihla',
+                  style: TextStyle(
+                    fontSize: 27,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -1,
+                  ),
+                ),
               ),
             ),
           ],
@@ -223,7 +257,7 @@ class _HomeState extends State<Home> {
         actions: [
           const Chip(
             avatar: Icon(Icons.offline_pin_rounded, size: 16, color: teal),
-            label: Text('On-device', style: TextStyle(fontSize: 12)),
+            label: UiText('On-device', style: TextStyle(fontSize: 12)),
             side: BorderSide.none,
             backgroundColor: Color(0xFFE7F3EF),
           ),
@@ -256,12 +290,12 @@ class _HomeState extends State<Home> {
                         segments: const [
                           ButtonSegment(
                             value: 'shop',
-                            label: Text('Shop'),
+                            label: UiText('Shop'),
                             icon: Icon(Icons.storefront_outlined, size: 16),
                           ),
                           ButtonSegment(
                             value: 'van',
-                            label: Text('Van'),
+                            label: UiText('Van'),
                             icon: Icon(Icons.local_shipping_outlined, size: 16),
                           ),
                         ],
@@ -296,7 +330,7 @@ class _HomeState extends State<Home> {
                   ? addCustomer
                   : newSale,
               icon: const Icon(Icons.add_rounded),
-              label: Text(
+              label: UiText(
                 page == 2
                     ? 'Add item'
                     : page == 3
@@ -309,24 +343,27 @@ class _HomeState extends State<Home> {
         onDestinationSelected: go,
         backgroundColor: Colors.white,
         indicatorColor: const Color(0xFFDDF0EA),
-        destinations: const [
+        destinations: [
           NavigationDestination(
             icon: Icon(Icons.grid_view_rounded),
-            label: 'Overview',
+            label: tr(context, 'Overview'),
           ),
           NavigationDestination(
             icon: Icon(Icons.receipt_long_outlined),
-            label: 'Sales',
+            label: tr(context, 'Sales'),
           ),
           NavigationDestination(
             icon: Icon(Icons.inventory_2_outlined),
-            label: 'Stock',
+            label: tr(context, 'Stock'),
           ),
           NavigationDestination(
             icon: Icon(Icons.people_outline_rounded),
-            label: 'Customers',
+            label: tr(context, 'Customers'),
           ),
-          NavigationDestination(icon: Icon(Icons.tune_rounded), label: 'More'),
+          NavigationDestination(
+            icon: const Icon(Icons.tune_rounded),
+            label: tr(context, 'More'),
+          ),
         ],
       ),
     );
@@ -354,14 +391,14 @@ class _HomeState extends State<Home> {
     );
     final low = products.where((p) => (p[location] as int) <= 5).toList();
     return [
-      Text(
+      UiText(
         location == 'van'
             ? 'Ready for the road.'
             : 'Your business, at a glance.',
         style: Theme.of(context).textTheme.headlineMedium,
       ),
       const SizedBox(height: 6),
-      Text(
+      UiText(
         DateFormat('EEEE, d MMMM yyyy').format(now),
         style: const TextStyle(color: Color(0xFF71818A)),
       ),
@@ -383,7 +420,7 @@ class _HomeState extends State<Home> {
                   size: 20,
                 ),
                 SizedBox(width: 9),
-                Text(
+                UiText(
                   "TODAY'S SALES",
                   style: TextStyle(
                     color: Color(0xFFB9D2D1),
@@ -395,7 +432,7 @@ class _HomeState extends State<Home> {
               ],
             ),
             const SizedBox(height: 14),
-            Text(
+            UiText(
               money(revenue),
               style: const TextStyle(
                 color: Colors.white,
@@ -405,7 +442,7 @@ class _HomeState extends State<Home> {
               ),
             ),
             const SizedBox(height: 14),
-            Text(
+            UiText(
               '${today.length} sales recorded  •  ${location == 'shop' ? 'Shop counter' : 'Van inventory'}',
               style: const TextStyle(color: Color(0xFFB9D2D1)),
             ),
@@ -472,7 +509,7 @@ class _HomeState extends State<Home> {
       else
         ...localSales.take(4).map(saleTile),
       const SizedBox(height: 20),
-      const Text(
+      const UiText(
         'Works without internet. Shop and van data on this device are separate stock locations.',
         style: TextStyle(color: Color(0xFF71818A), fontSize: 12),
       ),
@@ -487,12 +524,12 @@ class _HomeState extends State<Home> {
         children: [
           Icon(icon, color: color, size: 23),
           const SizedBox(height: 16),
-          Text(
+          UiText(
             value,
             style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 20),
           ),
           const SizedBox(height: 4),
-          Text(label, style: const TextStyle(color: Color(0xFF71818A))),
+          UiText(label, style: const TextStyle(color: Color(0xFF71818A))),
         ],
       ),
     ),
@@ -507,7 +544,7 @@ class _HomeState extends State<Home> {
           children: [
             Icon(icon, color: teal),
             const SizedBox(height: 10),
-            Text(
+            UiText(
               label,
               style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
             ),
@@ -519,10 +556,10 @@ class _HomeState extends State<Home> {
   Widget section(String title, {VoidCallback? onTap}) => Row(
     children: [
       Expanded(
-        child: Text(title, style: Theme.of(context).textTheme.titleMedium),
+        child: UiText(title, style: Theme.of(context).textTheme.titleMedium),
       ),
       if (onTap != null)
-        TextButton(onPressed: onTap, child: const Text('View all')),
+        TextButton(onPressed: onTap, child: const UiText('View all')),
     ],
   );
   Widget searchField(String hint) => Padding(
@@ -530,7 +567,7 @@ class _HomeState extends State<Home> {
     child: TextField(
       controller: searchController,
       decoration: InputDecoration(
-        hintText: hint,
+        hintText: tr(context, hint),
         prefixIcon: const Icon(Icons.search_rounded),
         fillColor: Colors.white,
       ),
@@ -540,9 +577,9 @@ class _HomeState extends State<Home> {
   Widget heading(String title, String subtitle) => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
-      Text(title, style: Theme.of(context).textTheme.headlineMedium),
+      UiText(title, style: Theme.of(context).textTheme.headlineMedium),
       const SizedBox(height: 6),
-      Text(subtitle, style: const TextStyle(color: Color(0xFF71818A))),
+      UiText(subtitle, style: const TextStyle(color: Color(0xFF71818A))),
     ],
   );
   Widget empty(IconData icon, String title, String subtitle) => Card(
@@ -552,13 +589,13 @@ class _HomeState extends State<Home> {
         children: [
           Icon(icon, color: teal, size: 36),
           const SizedBox(height: 16),
-          Text(
+          UiText(
             title,
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.titleMedium,
           ),
           const SizedBox(height: 8),
-          Text(
+          UiText(
             subtitle,
             textAlign: TextAlign.center,
             style: const TextStyle(color: Color(0xFF71818A)),
@@ -616,7 +653,7 @@ class _HomeState extends State<Home> {
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(fontWeight: FontWeight.w600),
           ),
-          subtitle: Text(
+          subtitle: UiText(
             '${invoiceNo(sale['id'] as int)}\n${dateLabel(sale['created'])}',
             style: const TextStyle(fontSize: 11, height: 1.6),
           ),
@@ -624,11 +661,11 @@ class _HomeState extends State<Home> {
             mainAxisAlignment: MainAxisAlignment.center,
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              Text(
+              UiText(
                 money(netTotal),
                 style: const TextStyle(fontWeight: FontWeight.w700),
               ),
-              Text(
+              UiText(
                 due == 0 ? 'Paid' : '${money(due)} due',
                 style: TextStyle(
                   fontSize: 11,
@@ -679,16 +716,16 @@ class _HomeState extends State<Home> {
                 p['name'] as String,
                 style: const TextStyle(fontWeight: FontWeight.w600),
               ),
-              subtitle: Text('${p['sku']}  •  ${money(p['price'] as int)}'),
+              subtitle: UiText('${p['sku']}  •  ${money(p['price'] as int)}'),
               trailing: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  Text(
+                  UiText(
                     '${p[location]} units',
                     style: const TextStyle(fontWeight: FontWeight.w700),
                   ),
-                  Text(
+                  UiText(
                     (p[location] as int) <= 5 ? 'Low stock' : 'In stock',
                     style: TextStyle(
                       fontSize: 11,
@@ -734,7 +771,7 @@ class _HomeState extends State<Home> {
               ),
               leading: CircleAvatar(
                 backgroundColor: const Color(0xFFE8F2ED),
-                child: Text(
+                child: UiText(
                   (c['name'] as String).characters.first.toUpperCase(),
                   style: const TextStyle(color: teal),
                 ),
@@ -743,10 +780,10 @@ class _HomeState extends State<Home> {
                 c['name'] as String,
                 style: const TextStyle(fontWeight: FontWeight.w600),
               ),
-              subtitle: Text(
+              subtitle: UiText(
                 [c['phone'], c['area']].where((s) => s != '').join(' • '),
               ),
-              trailing: Text(
+              trailing: UiText(
                 money(c['balance'] as int),
                 style: TextStyle(
                   color: c['balance'] == 0 ? teal : const Color(0xFFA96E1D),
@@ -763,14 +800,19 @@ class _HomeState extends State<Home> {
 
   List<Widget> morePage() => [
     heading('Business tools', 'Purchases, expenses, suppliers and reports.'),
+    const SizedBox(height: 8),
+    const UiText(
+      'Rihla POS • Version $appVersion',
+      style: TextStyle(color: Color(0xFF71818A)),
+    ),
     const SizedBox(height: 24),
     Card(
       child: Column(
         children: [
           ListTile(
             leading: const Icon(Icons.shopping_cart_outlined, color: teal),
-            title: const Text('Purchases'),
-            subtitle: const Text('Receive stock and track supplier credit'),
+            title: const UiText('Purchases'),
+            subtitle: const UiText('Receive stock and track supplier credit'),
             trailing: const Icon(Icons.chevron_right),
             onTap: () => openOperation(
               PurchasesScreen(store: store!, location: location),
@@ -779,16 +821,16 @@ class _HomeState extends State<Home> {
           const Divider(height: 1),
           ListTile(
             leading: const Icon(Icons.local_shipping_outlined, color: teal),
-            title: const Text('Suppliers'),
-            subtitle: const Text('Contacts and payable balances'),
+            title: const UiText('Suppliers'),
+            subtitle: const UiText('Contacts and payable balances'),
             trailing: const Icon(Icons.chevron_right),
             onTap: () => openOperation(SuppliersScreen(store: store!)),
           ),
           const Divider(height: 1),
           ListTile(
             leading: const Icon(Icons.payments_outlined, color: teal),
-            title: const Text('Expenses'),
-            subtitle: const Text('Record daily business costs'),
+            title: const UiText('Expenses'),
+            subtitle: const UiText('Record daily business costs'),
             trailing: const Icon(Icons.chevron_right),
             onTap: () => openOperation(
               ExpensesScreen(store: store!, location: location),
@@ -797,8 +839,8 @@ class _HomeState extends State<Home> {
           const Divider(height: 1),
           ListTile(
             leading: const Icon(Icons.bar_chart_rounded, color: teal),
-            title: const Text('Reports'),
-            subtitle: const Text('Sales, profit, stock and balances'),
+            title: const UiText('Reports'),
+            subtitle: const UiText('Sales, profit, stock and balances'),
             trailing: const Icon(Icons.chevron_right),
             onTap: () => openOperation(ReportsScreen(store: store!)),
           ),
@@ -811,16 +853,57 @@ class _HomeState extends State<Home> {
         children: [
           ListTile(
             leading: const Icon(Icons.storefront_outlined, color: teal),
-            title: const Text('Business profile'),
+            title: const UiText('Business profile'),
             subtitle: Text(settings['business'] ?? ''),
             trailing: const Icon(Icons.chevron_right),
             onTap: editSettings,
           ),
           const Divider(height: 1),
           ListTile(
-            leading: const Icon(Icons.percent_rounded, color: teal),
-            title: const Text('Sales tax'),
+            leading: const Icon(Icons.backup_outlined, color: teal),
+            title: const UiText('Backup and restore'),
+            subtitle: const UiText(
+              'Save your records or recover from a backup',
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => openOperation(BackupScreen(store: store!)),
+          ),
+          const Divider(height: 1),
+          ListTile(
+            leading: const Icon(Icons.language, color: teal),
+            title: const UiText('Language'),
             subtitle: Text(
+              settings['language'] == 'ar' ? 'العربية' : 'English',
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () async {
+              final chosen = await showDialog<String>(
+                context: context,
+                builder: (ctx) => SimpleDialog(
+                  title: const UiText('Language'),
+                  children: [
+                    SimpleDialogOption(
+                      onPressed: () => Navigator.pop(ctx, 'en'),
+                      child: const Text('English'),
+                    ),
+                    SimpleDialogOption(
+                      onPressed: () => Navigator.pop(ctx, 'ar'),
+                      child: const Text('العربية'),
+                    ),
+                  ],
+                ),
+              );
+              if (chosen != null) {
+                await store!.saveLanguage(chosen);
+                await refresh();
+              }
+            },
+          ),
+          const Divider(height: 1),
+          ListTile(
+            leading: const Icon(Icons.percent_rounded, color: teal),
+            title: const UiText('Sales tax'),
+            subtitle: UiText(
               '${(int.parse(settings['tax_bps'] ?? '0') / 100).toStringAsFixed(2)}% • prices exclude tax',
             ),
             onTap: editSettings,
@@ -838,8 +921,8 @@ class _HomeState extends State<Home> {
     const Card(
       child: Padding(
         padding: EdgeInsets.all(20),
-        child: Text(
-          'Local data is not yet backed up or shared between devices. Saudi e-invoicing, Arabic and printer support are planned. Use sample business data while testing.',
+        child: UiText(
+          'Save regular backups. Devices do not sync automatically. Saudi e-invoicing and thermal printer support are not configured. Use sample business data while testing.',
           style: TextStyle(color: Color(0xFF71818A), height: 1.6),
         ),
       ),
@@ -921,21 +1004,21 @@ class _HomeState extends State<Home> {
                 p['name'] as String,
                 style: const TextStyle(fontWeight: FontWeight.bold),
               ),
-              subtitle: Text('Shop: ${p['shop']} • Van: ${p['van']}'),
+              subtitle: UiText('Shop: ${p['shop']} • Van: ${p['van']}'),
             ),
             ListTile(
               leading: const Icon(Icons.edit_outlined),
-              title: const Text('Edit item details'),
+              title: const UiText('Edit item details'),
               onTap: () => Navigator.pop(c, 'edit'),
             ),
             ListTile(
               leading: const Icon(Icons.add_box_outlined),
-              title: Text('Receive stock into $location'),
+              title: UiText('Receive stock into $location'),
               onTap: () => Navigator.pop(c, 'receive'),
             ),
             ListTile(
               leading: const Icon(Icons.swap_horiz),
-              title: Text(
+              title: UiText(
                 'Transfer $location → ${location == 'shop' ? 'van' : 'shop'}',
               ),
               onTap: () => Navigator.pop(c, 'transfer'),
@@ -1015,19 +1098,19 @@ class _HomeState extends State<Home> {
                 c['name'] as String,
                 style: Theme.of(ctx).textTheme.titleLarge,
               ),
-              Text('${c['phone']}  ${c['area']}'),
+              UiText('${c['phone']}  ${c['area']}'),
               const SizedBox(height: 12),
-              Text('Outstanding: ${money(c['balance'] as int)}'),
+              UiText('Outstanding: ${money(c['balance'] as int)}'),
               const SizedBox(height: 20),
               if (related.isEmpty)
-                const Text('No sales for this customer yet.'),
+                const UiText('No sales for this customer yet.'),
               ...related.map(
                 (s) => ListTile(
-                  title: Text(invoiceNo(s['id'] as int)),
-                  subtitle: Text(
+                  title: UiText(invoiceNo(s['id'] as int)),
+                  subtitle: UiText(
                     '${s['location']} • ${dateLabel(s['created'])}',
                   ),
-                  trailing: Text(
+                  trailing: UiText(
                     money(
                       (s['total'] as int) -
                           (s['returned'] as int) -
@@ -1063,12 +1146,12 @@ class _HomeState extends State<Home> {
             children: [
               const Icon(Icons.check_circle_rounded, color: teal, size: 40),
               const SizedBox(height: 12),
-              Text(
+              UiText(
                 invoiceNo(sale['id'] as int),
                 textAlign: TextAlign.center,
                 style: Theme.of(ctx).textTheme.titleLarge,
               ),
-              Text(
+              UiText(
                 'Sales record • saved on this device',
                 textAlign: TextAlign.center,
                 style: const TextStyle(color: teal),
@@ -1078,17 +1161,17 @@ class _HomeState extends State<Home> {
                 sale['customer_name'] as String,
                 style: Theme.of(ctx).textTheme.titleMedium,
               ),
-              Text('${dateLabel(sale['created'])} • ${sale['location']}'),
+              UiText('${dateLabel(sale['created'])} • ${sale['location']}'),
               const Divider(height: 32),
               ...lines.map(
                 (line) => ListTile(
                   contentPadding: EdgeInsets.zero,
                   title: Text(line['name'] as String),
-                  subtitle: Text(
+                  subtitle: UiText(
                     '${line['quantity']} × ${money(line['price'] as int)}'
                     '${(line['returned'] as int) > 0 ? ' • ${line['returned']} returned' : ''}',
                   ),
-                  trailing: Text(
+                  trailing: UiText(
                     money((line['quantity'] as int) * (line['price'] as int)),
                   ),
                 ),
@@ -1114,6 +1197,20 @@ class _HomeState extends State<Home> {
                 bold: true,
               ),
               const SizedBox(height: 18),
+              OutlinedButton.icon(
+                onPressed: exportingPdf
+                    ? null
+                    : () => Navigator.pop(ctx, 'save-pdf'),
+                icon: const Icon(Icons.picture_as_pdf_outlined),
+                label: const UiText('Save PDF'),
+              ),
+              OutlinedButton.icon(
+                onPressed: exportingPdf
+                    ? null
+                    : () => Navigator.pop(ctx, 'share-pdf'),
+                icon: const Icon(Icons.share_outlined),
+                label: const UiText('Share PDF'),
+              ),
               if ((sale['total'] as int) -
                       (sale['returned'] as int) -
                       (sale['paid'] as int) +
@@ -1122,7 +1219,7 @@ class _HomeState extends State<Home> {
                 FilledButton.icon(
                   onPressed: () => Navigator.pop(ctx, 'collect'),
                   icon: const Icon(Icons.payments_outlined),
-                  label: const Text('Record payment'),
+                  label: const UiText('Record payment'),
                 ),
               if (lines.any(
                 (line) => (line['quantity'] as int) > (line['returned'] as int),
@@ -1131,11 +1228,11 @@ class _HomeState extends State<Home> {
                 OutlinedButton.icon(
                   onPressed: () => Navigator.pop(ctx, 'return'),
                   icon: const Icon(Icons.assignment_return_outlined),
-                  label: const Text('Return items'),
+                  label: const UiText('Return items'),
                 ),
               ],
               const SizedBox(height: 16),
-              const Text(
+              const UiText(
                 'Sales record for testing. Saudi e-invoicing is not configured.',
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 12, color: Color(0xFF71818A)),
@@ -1145,6 +1242,9 @@ class _HomeState extends State<Home> {
         ),
       ),
     );
+    if ((action == 'save-pdf' || action == 'share-pdf') && mounted) {
+      await exportInvoice(sale, lines, share: action == 'share-pdf');
+    }
     if (action == 'return' && mounted) {
       final quantities = await showModalBottomSheet<Map<int, int>>(
         context: context,
@@ -1191,14 +1291,58 @@ class _HomeState extends State<Home> {
       );
     }
   }
+
+  Future<void> exportInvoice(
+    DbRow sale,
+    List<DbRow> lines, {
+    required bool share,
+  }) async {
+    if (exportingPdf) return;
+    exportingPdf = true;
+    final language = Localizations.localeOf(context).languageCode;
+    try {
+      final bytes = await createInvoicePdf(
+        sale: sale,
+        lines: lines,
+        business: settings['business'] ?? 'My business',
+        language: language,
+      );
+      if (!mounted) return;
+      final filename = '${invoiceNo(sale['id'] as int)}.pdf';
+      if (share) {
+        final box = context.findRenderObject() as RenderBox?;
+        await Printing.sharePdf(
+          bytes: bytes,
+          filename: filename,
+          bounds: box == null
+              ? null
+              : box.localToGlobal(Offset.zero) & box.size,
+        );
+      } else {
+        final saved = await FilePicker.platform.saveFile(
+          fileName: filename,
+          type: FileType.custom,
+          allowedExtensions: ['pdf'],
+          bytes: bytes,
+        );
+        if (mounted) {
+          toast(saved == null ? 'PDF save cancelled.' : 'PDF saved.');
+        }
+      }
+    } catch (_) {
+      if (mounted) toast('Could not create the PDF. Please try again.');
+    } finally {
+      exportingPdf = false;
+    }
+  }
 }
 
 Widget totalRow(String label, int value, {bool bold = false}) => Padding(
   padding: const EdgeInsets.symmetric(vertical: 7),
   child: Row(
     children: [
-      Expanded(child: Text(label)),
-      Text(
+      Expanded(child: UiText(label)),
+      UiText(
         money(value),
         style: TextStyle(
           fontWeight: bold ? FontWeight.w800 : FontWeight.w500,
@@ -1241,11 +1385,11 @@ class SalesChart extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
+            UiText(
               money(totals.fold(0, (a, b) => a + b)),
               style: Theme.of(context).textTheme.titleLarge,
             ),
-            const Text(
+            const UiText(
               'Total sales including configured tax',
               style: TextStyle(fontSize: 11, color: Color(0xFF71818A)),
             ),
@@ -1274,7 +1418,7 @@ class SalesChart extends StatelessWidget {
                             ),
                           ),
                           const SizedBox(height: 12),
-                          Text(
+                          UiText(
                             DateFormat('E').format(days[i]),
                             style: const TextStyle(
                               fontSize: 11,
@@ -1381,7 +1525,10 @@ class _EntrySheetState extends State<EntrySheet> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text(widget.title, style: Theme.of(context).textTheme.titleLarge),
+              UiText(
+                widget.title,
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
               const SizedBox(height: 20),
               for (var i = 0; i < widget.fields.length; i++)
                 Padding(
@@ -1393,7 +1540,7 @@ class _EntrySheetState extends State<EntrySheet> {
                         ? const TextInputType.numberWithOptions(decimal: true)
                         : TextInputType.text,
                     decoration: InputDecoration(
-                      labelText: widget.fields[i].label,
+                      labelText: tr(context, widget.fields[i].label),
                     ),
                     textInputAction: i == widget.fields.length - 1
                         ? TextInputAction.done
@@ -1403,14 +1550,14 @@ class _EntrySheetState extends State<EntrySheet> {
               if (error != null)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 14),
-                  child: Text(
+                  child: UiText(
                     error!,
                     style: const TextStyle(color: Colors.red),
                   ),
                 ),
               FilledButton(
                 onPressed: busy ? null : submit,
-                child: Text(busy ? 'Saving…' : 'Save'),
+                child: UiText(busy ? 'Saving…' : 'Save'),
               ),
             ],
           ),

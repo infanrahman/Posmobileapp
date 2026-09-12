@@ -42,23 +42,23 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
   );
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Suppliers')),
+    appBar: AppBar(title: const UiText('Suppliers')),
     floatingActionButton: FloatingActionButton.extended(
       onPressed: add,
       icon: const Icon(Icons.add),
-      label: const Text('Add supplier'),
+      label: const UiText('Add supplier'),
     ),
     body: loading
         ? const Center(child: CircularProgressIndicator())
         : ListView(
             padding: const EdgeInsets.fromLTRB(20, 12, 20, 100),
             children: [
-              Text(
+              UiText(
                 'Supplier accounts',
                 style: Theme.of(context).textTheme.headlineMedium,
               ),
               const SizedBox(height: 6),
-              const Text(
+              const UiText(
                 'Contacts and purchase balances saved offline.',
                 style: TextStyle(color: Color(0xFF71818A)),
               ),
@@ -77,7 +77,7 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
                     child: ListTile(
                       leading: CircleAvatar(
                         backgroundColor: const Color(0xFFE8F2ED),
-                        child: Text(
+                        child: UiText(
                           (s['name'] as String).characters.first.toUpperCase(),
                           style: const TextStyle(color: teal),
                         ),
@@ -86,7 +86,7 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
                         s['name'] as String,
                         style: const TextStyle(fontWeight: FontWeight.w700),
                       ),
-                      subtitle: Text(
+                      subtitle: UiText(
                         [
                           s['phone'],
                           s['tax_number'],
@@ -96,11 +96,11 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
                         mainAxisAlignment: MainAxisAlignment.center,
                         crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
-                          Text(
+                          UiText(
                             money(s['balance'] as int),
                             style: const TextStyle(fontWeight: FontWeight.w700),
                           ),
-                          const Text(
+                          const UiText(
                             'payable',
                             style: TextStyle(
                               fontSize: 11,
@@ -175,11 +175,11 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text(
+                UiText(
                   'Purchase #${purchase['id']}',
                   style: Theme.of(ctx).textTheme.titleLarge,
                 ),
-                Text(
+                UiText(
                   '${purchase['supplier_name']} • ${dateLabel(purchase['created'])}',
                 ),
                 const Divider(height: 28),
@@ -187,10 +187,10 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
                   (line) => ListTile(
                     contentPadding: EdgeInsets.zero,
                     title: Text(line['name'] as String),
-                    subtitle: Text(
+                    subtitle: UiText(
                       '${line['quantity']} × ${money(line['cost'] as int)}',
                     ),
-                    trailing: Text(
+                    trailing: UiText(
                       money((line['quantity'] as int) * (line['cost'] as int)),
                     ),
                   ),
@@ -207,7 +207,7 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
                   FilledButton.icon(
                     onPressed: () => Navigator.pop(ctx, true),
                     icon: const Icon(Icons.payments_outlined),
-                    label: const Text('Record supplier payment'),
+                    label: const UiText('Record supplier payment'),
                   ),
               ],
             ),
@@ -238,23 +238,23 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Purchases')),
+    appBar: AppBar(title: const UiText('Purchases')),
     floatingActionButton: FloatingActionButton.extended(
       onPressed: add,
       icon: const Icon(Icons.add),
-      label: const Text('New purchase'),
+      label: const UiText('New purchase'),
     ),
     body: loading
         ? const Center(child: CircularProgressIndicator())
         : ListView(
             padding: const EdgeInsets.fromLTRB(20, 12, 20, 100),
             children: [
-              Text(
+              UiText(
                 'Purchase ledger',
                 style: Theme.of(context).textTheme.headlineMedium,
               ),
               const SizedBox(height: 6),
-              Text(
+              UiText(
                 'Stock received into ${widget.location}.',
                 style: const TextStyle(color: Color(0xFF71818A)),
               ),
@@ -282,18 +282,18 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
                         p['supplier_name'] as String,
                         style: const TextStyle(fontWeight: FontWeight.w700),
                       ),
-                      subtitle: Text(
+                      subtitle: UiText(
                         'PUR-${p['id'].toString().padLeft(5, '0')} • ${dateLabel(p['created'])} • ${p['location']}',
                       ),
                       trailing: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
-                          Text(
+                          UiText(
                             money(p['total'] as int),
                             style: const TextStyle(fontWeight: FontWeight.w700),
                           ),
-                          Text(
+                          UiText(
                             p['paid'] == p['total']
                                 ? 'Paid'
                                 : '${money((p['total'] as int) - (p['paid'] as int))} due',
@@ -436,7 +436,7 @@ class _PurchaseEditorState extends State<PurchaseEditor> {
       ),
     );
     return Scaffold(
-      appBar: AppBar(title: const Text('New purchase')),
+      appBar: AppBar(title: const UiText('New purchase')),
       body: loading
           ? const Center(child: CircularProgressIndicator())
           : AbsorbPointer(
@@ -447,11 +447,13 @@ class _PurchaseEditorState extends State<PurchaseEditor> {
                   DropdownButtonFormField<int>(
                     initialValue: supplier,
                     isExpanded: true,
-                    decoration: const InputDecoration(labelText: 'Supplier'),
+                    decoration: InputDecoration(
+                      labelText: tr(context, 'Supplier'),
+                    ),
                     items: [
                       const DropdownMenuItem(
                         value: null,
-                        child: Text('Cash supplier'),
+                        child: UiText('Cash supplier'),
                       ),
                       ...suppliers.map(
                         (s) => DropdownMenuItem(
@@ -464,8 +466,8 @@ class _PurchaseEditorState extends State<PurchaseEditor> {
                   ),
                   const SizedBox(height: 16),
                   TextField(
-                    decoration: const InputDecoration(
-                      hintText: 'Search products',
+                    decoration: InputDecoration(
+                      hintText: tr(context, 'Search products'),
                       prefixIcon: Icon(Icons.search),
                     ),
                     onChanged: (v) => setState(() => query = v),
@@ -488,7 +490,7 @@ class _PurchaseEditorState extends State<PurchaseEditor> {
                             p['name'] as String,
                             style: const TextStyle(fontWeight: FontWeight.w700),
                           ),
-                          subtitle: Text(
+                          subtitle: UiText(
                             item == null
                                 ? 'Current cost ${money(p['cost'] as int)}'
                                 : '${item.quantity} × ${money(item.cost)}',
@@ -498,7 +500,7 @@ class _PurchaseEditorState extends State<PurchaseEditor> {
                                   Icons.add_circle_outline,
                                   color: teal,
                                 )
-                              : Text(
+                              : UiText(
                                   money(item.quantity * item.cost),
                                   style: const TextStyle(
                                     fontWeight: FontWeight.w700,
@@ -516,9 +518,9 @@ class _PurchaseEditorState extends State<PurchaseEditor> {
                   const SizedBox(height: 18),
                   SegmentedButton<String>(
                     segments: const [
-                      ButtonSegment(value: 'paid', label: Text('Paid')),
-                      ButtonSegment(value: 'partial', label: Text('Partial')),
-                      ButtonSegment(value: 'credit', label: Text('Credit')),
+                      ButtonSegment(value: 'paid', label: UiText('Paid')),
+                      ButtonSegment(value: 'partial', label: UiText('Partial')),
+                      ButtonSegment(value: 'credit', label: UiText('Credit')),
                     ],
                     selected: {paymentMode},
                     onSelectionChanged: (v) =>
@@ -532,15 +534,15 @@ class _PurchaseEditorState extends State<PurchaseEditor> {
                         keyboardType: const TextInputType.numberWithOptions(
                           decimal: true,
                         ),
-                        decoration: const InputDecoration(
-                          labelText: 'Amount paid (SAR)',
+                        decoration: InputDecoration(
+                          labelText: tr(context, 'Amount paid (SAR)'),
                         ),
                       ),
                     ),
                   if (error != null)
                     Padding(
                       padding: const EdgeInsets.only(top: 14),
-                      child: Text(
+                      child: UiText(
                         error!,
                         style: const TextStyle(color: Colors.red),
                       ),
@@ -549,7 +551,7 @@ class _PurchaseEditorState extends State<PurchaseEditor> {
                   FilledButton.icon(
                     onPressed: saving || cart.isEmpty ? null : save,
                     icon: const Icon(Icons.check),
-                    label: Text(
+                    label: UiText(
                       saving ? 'Saving…' : 'Save purchase • ${money(total)}',
                     ),
                   ),
@@ -608,23 +610,23 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Expenses')),
+    appBar: AppBar(title: const UiText('Expenses')),
     floatingActionButton: FloatingActionButton.extended(
       onPressed: add,
       icon: const Icon(Icons.add),
-      label: const Text('Add expense'),
+      label: const UiText('Add expense'),
     ),
     body: loading
         ? const Center(child: CircularProgressIndicator())
         : ListView(
             padding: const EdgeInsets.fromLTRB(20, 12, 20, 100),
             children: [
-              Text(
+              UiText(
                 'Expense book',
                 style: Theme.of(context).textTheme.headlineMedium,
               ),
               const SizedBox(height: 6),
-              const Text(
+              const UiText(
                 'Fuel, meals, rent and other operating costs.',
                 style: TextStyle(color: Color(0xFF71818A)),
               ),
@@ -652,10 +654,10 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                         e['category'] as String,
                         style: const TextStyle(fontWeight: FontWeight.w700),
                       ),
-                      subtitle: Text(
+                      subtitle: UiText(
                         '${e['note']} • ${e['location']} • ${dateLabel(e['created'])}',
                       ),
-                      trailing: Text(
+                      trailing: UiText(
                         money(e['amount'] as int),
                         style: const TextStyle(fontWeight: FontWeight.w700),
                       ),
@@ -673,7 +675,7 @@ class ReportsScreen extends StatelessWidget {
   const ReportsScreen({super.key, required this.store});
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Reports')),
+    appBar: AppBar(title: const UiText('Reports')),
     body: FutureBuilder<Map<String, int>>(
       future: store.report(),
       builder: (context, snapshot) {
@@ -684,12 +686,12 @@ class ReportsScreen extends StatelessWidget {
         return ListView(
           padding: const EdgeInsets.all(20),
           children: [
-            Text(
+            UiText(
               'Business reports',
               style: Theme.of(context).textTheme.headlineMedium,
             ),
             const SizedBox(height: 6),
-            const Text(
+            const UiText(
               'All recorded activity • shop and van combined',
               style: TextStyle(color: Color(0xFF71818A)),
             ),
@@ -753,7 +755,7 @@ class ReportsScreen extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 16),
-            const Text(
+            const UiText(
               'Gross profit uses the item cost saved at the time of sale. '
               'It is an operational estimate, not a filed tax statement.',
               style: TextStyle(
@@ -785,12 +787,12 @@ Widget reportCard(
           Icon(icon, color: color),
           const SizedBox(width: 14),
           Expanded(
-            child: Text(
+            child: UiText(
               title,
               style: const TextStyle(fontWeight: FontWeight.w600),
             ),
           ),
-          Text(
+          UiText(
             value < 0 ? '-${money(-value)}' : money(value),
             style: Theme.of(context).textTheme.titleMedium,
           ),
@@ -818,12 +820,12 @@ class _ReturnSheetState extends State<ReturnSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(
+            UiText(
               'Return sale items',
               style: Theme.of(context).textTheme.titleLarge,
             ),
             const SizedBox(height: 8),
-            const Text(
+            const UiText(
               'Returned quantities go back to the original stock location.',
               style: TextStyle(color: Color(0xFF71818A)),
             ),
@@ -841,7 +843,7 @@ class _ReturnSheetState extends State<ReturnSheet> {
                   return ListTile(
                     contentPadding: EdgeInsets.zero,
                     title: Text(line['name'] as String),
-                    subtitle: Text('$available available to return'),
+                    subtitle: UiText('$available available to return'),
                     trailing: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -853,7 +855,7 @@ class _ReturnSheetState extends State<ReturnSheet> {
                                 ),
                           icon: const Icon(Icons.remove_circle_outline),
                         ),
-                        Text('$selected'),
+                        UiText('$selected'),
                         IconButton(
                           onPressed: selected == available
                               ? null
@@ -877,7 +879,7 @@ class _ReturnSheetState extends State<ReturnSheet> {
                         if (e.value > 0) e.key: e.value,
                     })
                   : null,
-              child: const Text('Confirm return'),
+              child: const UiText('Confirm return'),
             ),
           ],
         ),
@@ -898,9 +900,9 @@ Widget operationEmpty(
       children: [
         Icon(icon, color: teal, size: 36),
         const SizedBox(height: 14),
-        Text(title, style: Theme.of(context).textTheme.titleMedium),
+        UiText(title, style: Theme.of(context).textTheme.titleMedium),
         const SizedBox(height: 6),
-        Text(
+        UiText(
           subtitle,
           textAlign: TextAlign.center,
           style: const TextStyle(color: Color(0xFF71818A)),

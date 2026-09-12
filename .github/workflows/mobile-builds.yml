@@ -52,10 +52,15 @@ jobs:
           cache: true
       - run: flutter pub get --enforce-lockfile
       - run: flutter build apk --debug
+      - name: Name Android download
+        run: |
+          VERSION=$(sed -n 's/^version: //p' pubspec.yaml | tr '+' '-')
+          echo "APP_VERSION=$VERSION" >> "$GITHUB_ENV"
+          cp build/app/outputs/flutter-apk/app-debug.apk "build/app/outputs/flutter-apk/Rihla-POS-$VERSION.apk"
       - uses: actions/upload-artifact@v4
         with:
-          name: rihla-android-test-${{ github.run_number }}
-          path: build/app/outputs/flutter-apk/app-debug.apk
+          name: rihla-android-${{ env.APP_VERSION }}-${{ github.run_number }}
+          path: build/app/outputs/flutter-apk/Rihla-POS-*.apk
           if-no-files-found: error
           retention-days: 14
 
@@ -78,13 +83,19 @@ jobs:
       - run: flutter build ios --release --no-codesign
       - name: Package unsigned IPA
         run: |
+          VERSION=$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' build/ios/iphoneos/Runner.app/Info.plist)
+          BUILD=$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' build/ios/iphoneos/Runner.app/Info.plist)
+          EXPECTED=$(sed -n 's/^version: //p' pubspec.yaml)
+          test "$VERSION+$BUILD" = "$EXPECTED"
+          echo "APP_VERSION=$VERSION-$BUILD" >> "$GITHUB_ENV"
           mkdir -p build/ios/ipa/Payload
           cp -R build/ios/iphoneos/Runner.app build/ios/ipa/Payload/
-          (cd build/ios/ipa && ditto -c -k --sequesterRsrc --keepParent Payload rihla-unsigned.ipa)
+          (cd build/ios/ipa && ditto -c -k --sequesterRsrc --keepParent Payload "Rihla-POS-$VERSION-build$BUILD-unsigned.ipa")
+          echo "Packaged Rihla POS $VERSION (build $BUILD), commit $GITHUB_SHA." >> "$GITHUB_STEP_SUMMARY"
           echo 'This is an unsigned IPA. Sign it with an Apple account using a sideloading tool, or use the Signed iOS IPA workflow with an active paid Apple Developer Program membership.' >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
-          name: rihla-ios-UNSIGNED-${{ github.run_number }}
-          path: build/ios/ipa/rihla-unsigned.ipa
+          name: rihla-ios-${{ env.APP_VERSION }}-UNSIGNED-${{ github.run_number }}
+          path: build/ios/ipa/Rihla-POS-*.ipa
           if-no-files-found: error
           retention-days: 14

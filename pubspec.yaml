@@ -1,7 +1,7 @@
 name: rihla_pos
 description: Offline retail and van sales for Saudi businesses.
 publish_to: none
-version: 0.2.0+2
+version: 0.3.0+3
 environment:
   sdk: ^3.12.2
 dependencies:
@@ -10,6 +10,12 @@ dependencies:
   sqflite: ^2.4.2
   path: ^1.9.1
   intl: ^0.20.2
+  file_picker: ^10.3.10
+  crypto: ^3.0.6
+  flutter_localizations:
+    sdk: flutter
+  pdf: ^3.13.0
+  printing: ^5.15.0
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -17,3 +23,11 @@ dev_dependencies:
   sqflite_common_ffi: ^2.3.6
 flutter:
   uses-material-design: true
+  assets:
+    - assets/fonts/OFL.txt
+  fonts:
+    - family: Amiri
+      fonts:
+        - asset: assets/fonts/Amiri-Regular.ttf
+        - asset: assets/fonts/Amiri-Bold.ttf
+          weight: 700

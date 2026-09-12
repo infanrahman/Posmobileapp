@@ -182,6 +182,16 @@ class PosStore {
     });
   }
 
+  Future<void> saveLanguage(String language) async {
+    if (language != 'en' && language != 'ar') {
+      throw const FormatException('Unsupported language.');
+    }
+    await db.insert('settings', {
+      'key': 'language',
+      'value': language,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
   Future<void> addProduct(
     String name,
     String sku,

@@ -67,7 +67,7 @@ class _SaleScreenState extends State<SaleScreen> {
     if (next > (p[widget.location] as int)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('No more stock available at this location.'),
+          content: UiText('No more stock available at this location.'),
         ),
       );
       return;
@@ -103,7 +103,9 @@ class _SaleScreenState extends State<SaleScreen> {
       Navigator.pop(context);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('${invoiceNo(id)} saved. Stock and balances updated.'),
+          content: UiText(
+            '${invoiceNo(id)} saved. Stock and balances updated.',
+          ),
         ),
       );
     } catch (e) {
@@ -126,18 +128,18 @@ class _SaleScreenState extends State<SaleScreen> {
     final discard = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Discard this sale?'),
-        content: const Text(
+        title: const UiText('Discard this sale?'),
+        content: const UiText(
           'This unsaved cart will be cleared. Your inventory has not changed.',
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Keep editing'),
+            child: const UiText('Keep editing'),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Discard'),
+            child: const UiText('Discard'),
           ),
         ],
       ),
@@ -168,12 +170,12 @@ class _SaleScreenState extends State<SaleScreen> {
             onPressed: saving ? null : close,
             icon: const Icon(Icons.close),
           ),
-          title: const Text('New sale'),
+          title: const UiText('New sale'),
           actions: [
             Padding(
               padding: const EdgeInsets.only(right: 20),
               child: Chip(
-                label: Text(
+                label: UiText(
                   widget.location == 'shop' ? 'Shop stock' : 'Van stock',
                 ),
               ),
@@ -194,14 +196,14 @@ class _SaleScreenState extends State<SaleScreen> {
                           DropdownButtonFormField<int>(
                             initialValue: customer,
                             isExpanded: true,
-                            decoration: const InputDecoration(
-                              labelText: 'Customer',
+                            decoration: InputDecoration(
+                              labelText: tr(context, 'Customer'),
                               prefixIcon: Icon(Icons.person_outline),
                             ),
                             items: [
                               const DropdownMenuItem<int>(
                                 value: null,
-                                child: Text('Walk-in customer'),
+                                child: UiText('Walk-in customer'),
                               ),
                               ...customers.map(
                                 (c) => DropdownMenuItem(
@@ -216,14 +218,14 @@ class _SaleScreenState extends State<SaleScreen> {
                             onChanged: (v) => setState(() => customer = v),
                           ),
                           const SizedBox(height: 22),
-                          Text(
+                          UiText(
                             'Add items',
                             style: Theme.of(context).textTheme.titleLarge,
                           ),
                           const SizedBox(height: 12),
                           TextField(
-                            decoration: const InputDecoration(
-                              hintText: 'Search item or SKU',
+                            decoration: InputDecoration(
+                              hintText: tr(context, 'Search item or SKU'),
                               prefixIcon: Icon(Icons.search),
                             ),
                             onChanged: (v) => setState(() => query = v),
@@ -232,7 +234,7 @@ class _SaleScreenState extends State<SaleScreen> {
                           if (products.isEmpty)
                             const Padding(
                               padding: EdgeInsets.all(24),
-                              child: Text(
+                              child: UiText(
                                 'Add items from the Stock tab before making a sale.',
                                 textAlign: TextAlign.center,
                               ),
@@ -240,7 +242,7 @@ class _SaleScreenState extends State<SaleScreen> {
                           if (products.isNotEmpty && filtered.isEmpty)
                             const Padding(
                               padding: EdgeInsets.all(24),
-                              child: Text('No matching items.'),
+                              child: UiText('No matching items.'),
                             ),
                           ...filtered.map(
                             (p) => Padding(
@@ -262,7 +264,7 @@ class _SaleScreenState extends State<SaleScreen> {
                                               ),
                                             ),
                                             const SizedBox(height: 4),
-                                            Text(
+                                            UiText(
                                               '${money(p['price'] as int)} • ${p[widget.location]} available',
                                               style: const TextStyle(
                                                 fontSize: 12,
@@ -273,7 +275,10 @@ class _SaleScreenState extends State<SaleScreen> {
                                         ),
                                       ),
                                       IconButton(
-                                        tooltip: 'Remove one ${p['name']}',
+                                        tooltip: tr(
+                                          context,
+                                          'Remove one ${p['name']}',
+                                        ),
                                         onPressed: (cart[p['id']] ?? 0) == 0
                                             ? null
                                             : () => change(p, -1),
@@ -282,14 +287,17 @@ class _SaleScreenState extends State<SaleScreen> {
                                           color: teal,
                                         ),
                                       ),
-                                      Text(
+                                      UiText(
                                         '${cart[p['id']] ?? 0}',
                                         style: const TextStyle(
                                           fontWeight: FontWeight.w700,
                                         ),
                                       ),
                                       IconButton(
-                                        tooltip: 'Add one ${p['name']}',
+                                        tooltip: tr(
+                                          context,
+                                          'Add one ${p['name']}',
+                                        ),
                                         onPressed:
                                             (p[widget.location] as int) == 0
                                             ? null
@@ -306,7 +314,7 @@ class _SaleScreenState extends State<SaleScreen> {
                             ),
                           ),
                           const SizedBox(height: 22),
-                          Text(
+                          UiText(
                             'Sale summary',
                             style: Theme.of(context).textTheme.titleLarge,
                           ),
@@ -326,11 +334,11 @@ class _SaleScreenState extends State<SaleScreen> {
                                           child: Row(
                                             children: [
                                               Expanded(
-                                                child: Text(
+                                                child: UiText(
                                                   '${cart[p['id']]} × ${p['name']}',
                                                 ),
                                               ),
-                                              Text(
+                                              UiText(
                                                 money(
                                                   (p['price'] as int) *
                                                       cart[p['id']]!,
@@ -349,21 +357,24 @@ class _SaleScreenState extends State<SaleScreen> {
                             ),
                           ),
                           const SizedBox(height: 22),
-                          Text(
+                          UiText(
                             'Payment',
                             style: Theme.of(context).textTheme.titleLarge,
                           ),
                           const SizedBox(height: 12),
                           SegmentedButton<String>(
                             segments: const [
-                              ButtonSegment(value: 'paid', label: Text('Paid')),
+                              ButtonSegment(
+                                value: 'paid',
+                                label: UiText('Paid'),
+                              ),
                               ButtonSegment(
                                 value: 'partial',
-                                label: Text('Partial'),
+                                label: UiText('Partial'),
                               ),
                               ButtonSegment(
                                 value: 'credit',
-                                label: Text('Credit'),
+                                label: UiText('Credit'),
                               ),
                             ],
                             selected: {paymentMode},
@@ -378,14 +389,14 @@ class _SaleScreenState extends State<SaleScreen> {
                                   const TextInputType.numberWithOptions(
                                     decimal: true,
                                   ),
-                              decoration: const InputDecoration(
-                                labelText: 'Amount received (SAR)',
+                              decoration: InputDecoration(
+                                labelText: tr(context, 'Amount received (SAR)'),
                               ),
                             ),
                           if (paymentMode != 'paid')
                             const Padding(
                               padding: EdgeInsets.only(top: 10),
-                              child: Text(
+                              child: UiText(
                                 'Select a named customer to keep an unpaid balance.',
                                 style: TextStyle(color: Color(0xFF71818A)),
                               ),
@@ -393,7 +404,7 @@ class _SaleScreenState extends State<SaleScreen> {
                           if (error != null)
                             Padding(
                               padding: const EdgeInsets.symmetric(vertical: 14),
-                              child: Text(
+                              child: UiText(
                                 error!,
                                 style: const TextStyle(color: Colors.red),
                               ),
@@ -406,14 +417,14 @@ class _SaleScreenState extends State<SaleScreen> {
                                   ? Icons.hourglass_top
                                   : Icons.check_rounded,
                             ),
-                            label: Text(
+                            label: UiText(
                               saving
                                   ? 'Saving locally…'
                                   : 'Complete sale • ${money(subtotal + tax)}',
                             ),
                           ),
                           const SizedBox(height: 12),
-                          const Text(
+                          const UiText(
                             'Saved on this device. No internet required.',
                             textAlign: TextAlign.center,
                             style: TextStyle(

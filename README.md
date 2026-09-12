@@ -17,6 +17,9 @@ An offline mobile app for Saudi retail shops and van salespeople. One Flutter co
 - Shop and van expenses, plus reports for sales, tax, gross profit, operating profit, receivables, payables and stock value.
 - Business-name and tax settings; data persists across app restarts.
 - Automatic schema migration preserves existing version 1 app data.
+- Manual backup and restore for every business table, with file preview, checksum validation and transactional rollback for invalid records.
+- English and Arabic interface, right-to-left layouts and a saved language preference. Arabic fonts are bundled for offline use.
+- Save and share invoice PDFs in English or Arabic, including recorded payments, returns, refunds and remaining balances.
 
 The screenshots in `docs/` show isolated sample data. A fresh installation starts empty.
 
@@ -62,7 +65,10 @@ Release signing and store distribution are not configured. The generated Android
 7. Open **Sales → New sale**, choose the customer, add quantities and complete the sale.
 8. Open a sale to inspect its saved record, return items or collect an outstanding payment.
 9. Record operating costs under **More → Expenses** and view totals under **More → Reports**.
-10. Close and reopen the app. The saved records and remaining quantities should remain available without internet.
+10. Open a sale and choose **Save PDF** or **Share PDF**.
+11. Choose **More → Language → العربية** to use the Arabic interface.
+12. Choose **More → Backup and restore → Save backup** to save a JSON file outside the app. Restore previews the backup and requires **Replace records**; it replaces all device records rather than merging them. Save the current records first if you need to keep them. Files are limited to 25 MB, are not encrypted and should be kept privately. Local folders work offline; cloud file providers may need internet.
+13. Close and reopen the app. The saved records, language and quantities remain available without internet. **More** shows the installed app version; this release is **0.3.0 (build 3)**.
 
 ## Architecture
 
@@ -70,6 +76,9 @@ Release signing and store distribution are not configured. The generated Android
 - `lib/main.dart`: app theme, dashboard, inventory, customer ledger, settings and forms.
 - `lib/sale_screen.dart`: checkout and payment selection.
 - `lib/operations_screens.dart`: suppliers, purchases, expenses, reports and sales return screens.
+- `lib/backup.dart` and `lib/backup_screen.dart`: complete database snapshots, validation, atomic restore and native file selection.
+- `lib/l10n.dart`: Arabic interface translations and dynamic labels; user-entered product and business names remain unchanged.
+- `lib/invoice_pdf.dart`: offline invoice PDFs using bundled Amiri fonts.
 - `test/store_test.dart`: calculations, rollback, purchases, returns, reports, migration, concurrency, credit collection, persistence and price snapshots.
 - `test/widget_test.dart`: phone-sized navigation, complete checkout and reports with a real SQLite test database.
 - `test/preview_test.dart`: optional render with isolated demo data. Enabled by `RIHLA_PREVIEW_FONT`, pointing to a local font file; the font is never copied into the app.
@@ -81,11 +90,10 @@ SQLite schema version 2 includes products, customers, suppliers, sales, returns,
 This is an initial working version, not a complete Vyapar replacement or a Saudi e-invoicing solution.
 
 - Saudi e-invoicing/ZATCA integration, compliant invoice output and applicable validation are not implemented. Sales records are explicitly labelled for testing.
-- Arabic translation and right-to-left layouts are not implemented.
-- No backup/restore, multi-device sync, user accounts or device recovery. Uninstalling the app can remove its data. Use test data at this stage.
+- No multi-device sync or user accounts. Uninstalling the app can remove its data; keep manual backups outside the app. Restoring a backup replaces current records.
 - Shop and van are two locations on **one device**, not shared real-time stock across different phones. No multiple-van identifiers or route scheduling yet.
 - Purchase returns, sale cancellation, purchase orders, discounts and customer/supplier editing are not implemented.
-- No barcode camera, PDF export, receipt printer or payment terminal integration. Recording a payment does not process a card transaction.
+- No barcode camera, thermal receipt printer or payment terminal integration. Recording a payment does not process a card transaction.
 - The database is not encrypted; production device access controls and recovery policy remain to be designed.
 - Native Android/iOS device validation, airplane-mode testing, accessibility checks and release signing are still required.
 
@@ -95,6 +103,7 @@ SQLite platform reference: https://docs.flutter.dev/cookbook/persistence/sqlite
 ## Validation on 12 September 2026
 
 - `flutter analyze`: no issues.
-- Automated tests: 15 passed and the optional preview test was skipped without a local preview font (14 database tests and 1 checkout/navigation UI test).
+- Automated tests cover database operations and migration, checkout navigation, backup round trips and rollback, native file flow with a test picker, Arabic persistence and PDF generation. The optional dashboard preview test requires a local preview font.
+- English and Arabic invoice PDFs were rendered and visually inspected using sample records.
 - GitHub Actions builds the Android APK and unsigned iOS IPA on Linux and macOS runners after each push.
 - Android and iOS were not run on physical devices. A signed iOS IPA still requires an active paid Apple Developer Program team and repository signing secrets.
