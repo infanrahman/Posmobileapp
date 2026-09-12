@@ -144,6 +144,150 @@ void main() {
     },
   );
 
+  test(
+    'purchases update stock, cost and supplier balance atomically',
+    () async {
+      await store.addProduct('Water', 'W01', 150, 2, 'shop', cost: 50);
+      await store.addSupplier(
+        'Riyadh Wholesale',
+        '+966500000001',
+        '310000000000003',
+        'Riyadh',
+      );
+
+      final purchase = await store.addPurchase(
+        {1: (quantity: 3, cost: 75)},
+        'van',
+        1,
+        100,
+      );
+
+      final product = (await store.products()).single;
+      expect(product['shop'], 2);
+      expect(product['van'], 3);
+      expect(product['cost'], 75);
+      expect((await store.suppliers()).single['balance'], 125);
+      expect((await store.purchaseLines(purchase)).single['quantity'], 3);
+
+      await store.paySupplier(purchase, 125);
+      expect((await store.suppliers()).single['balance'], 0);
+      expect(
+        (await store.db.query(
+          'supplier_payments',
+        )).map((payment) => payment['amount']),
+        [100, 125],
+      );
+      await expectLater(store.paySupplier(purchase, 1), throwsFormatException);
+    },
+  );
+
+  test('credit purchase requires a supplier and rolls back stock', () async {
+    await store.addProduct('Water', 'W01', 150, 2, 'shop', cost: 50);
+
+    await expectLater(
+      store.addPurchase({1: (quantity: 3, cost: 75)}, 'shop', null, 0),
+      throwsFormatException,
+    );
+
+    expect(await store.purchases(), isEmpty);
+    final product = (await store.products()).single;
+    expect(product['shop'], 2);
+    expect(product['cost'], 50);
+  });
+
+  test('partial returns restore stock and settle credit and refunds', () async {
+    await store.addProduct('Water', 'W01', 100, 10, 'shop', cost: 40);
+    await store.addCustomer('Corner shop', '+966500000000', 'Riyadh');
+    final sale = await store.checkout({1: 3}, 'shop', 1, 1500, 150);
+    final line = (await store.lines(sale)).single;
+
+    expect(await store.returnSale(sale, {line['id'] as int: 1}), 0);
+    expect((await store.products()).single['shop'], 8);
+    expect((await store.customers()).single['balance'], 80);
+
+    expect(await store.returnSale(sale, {line['id'] as int: 2}), 150);
+    final returnedSale = (await store.sales()).single;
+    expect(returnedSale['returned'], 345);
+    expect(returnedSale['refunded'], 150);
+    expect((await store.products()).single['shop'], 10);
+    expect((await store.customers()).single['balance'], 0);
+    await expectLater(
+      store.returnSale(sale, {line['id'] as int: 1}),
+      throwsFormatException,
+    );
+  });
+
+  test('reports use saved costs, returns, expenses and balances', () async {
+    await store.addProduct('Juice', 'J01', 200, 5, 'shop', cost: 80);
+    await store.addCustomer('Mini market', '', 'Riyadh');
+    final sale = await store.checkout({1: 3}, 'shop', 1, 0, 200);
+    final line = (await store.lines(sale)).single;
+    await store.returnSale(sale, {line['id'] as int: 1});
+    await store.addExpense('Fuel', 'Van delivery', 50, 'van');
+
+    final report = await store.report();
+    expect(report['net_sales'], 400);
+    expect(report['gross_profit'], 240);
+    expect(report['expenses'], 50);
+    expect(report['receivables'], 200);
+    expect(report['stock_value'], 240);
+  });
+
+  test('version 1 database upgrades without losing product data', () async {
+    final directory = await Directory.systemTemp.createTemp('rihla_upgrade_');
+    final path = '${directory.path}/upgrade.db';
+    final legacy = await databaseFactoryFfi.openDatabase(
+      path,
+      options: OpenDatabaseOptions(
+        version: 1,
+        onCreate: (db, version) async {
+          await db.execute(
+            '''CREATE TABLE products (
+            id INTEGER PRIMARY KEY, name TEXT NOT NULL,
+            sku TEXT NOT NULL UNIQUE, price INTEGER NOT NULL,
+            shop INTEGER NOT NULL DEFAULT 0, van INTEGER NOT NULL DEFAULT 0)''',
+          );
+          await db.execute('''CREATE TABLE sales (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, created TEXT NOT NULL,
+            customer_id INTEGER, customer_name TEXT NOT NULL,
+            location TEXT NOT NULL, subtotal INTEGER NOT NULL,
+            tax INTEGER NOT NULL, total INTEGER NOT NULL,
+            paid INTEGER NOT NULL, tax_bps INTEGER NOT NULL)''');
+          await db.execute('''CREATE TABLE sale_lines (
+            id INTEGER PRIMARY KEY, sale_id INTEGER NOT NULL,
+            product_id INTEGER NOT NULL, name TEXT NOT NULL,
+            quantity INTEGER NOT NULL, price INTEGER NOT NULL)''');
+          await db.insert('products', {
+            'name': 'Legacy item',
+            'sku': 'OLD01',
+            'price': 500,
+            'shop': 4,
+            'van': 1,
+          });
+        },
+      ),
+    );
+    await legacy.close();
+
+    var upgraded = await PosStore.open(factory: databaseFactoryFfi, path: path);
+    try {
+      final product = (await upgraded.products()).single;
+      expect(product['name'], 'Legacy item');
+      expect(product['shop'], 4);
+      expect(product['cost'], 0);
+      expect(await upgraded.suppliers(), isEmpty);
+      expect(
+        (await upgraded.db.rawQuery(
+          'PRAGMA table_info(sales)',
+        )).map((column) => column['name']),
+        containsAll(['returned', 'refunded']),
+      );
+    } finally {
+      await upgraded.db.close();
+      await directory.delete(recursive: true);
+    }
+  });
+
   test('database records survive close and reopen', () async {
     final directory = await Directory.systemTemp.createTemp('rihla_test_');
     final path = '${directory.path}/persist.db';

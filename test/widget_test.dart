@@ -60,6 +60,20 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Walk-in customer'), findsOneWidget);
     expect(tester.takeException(), isNull);
+    await tester.tap(find.text('More').last);
+    await tester.pumpAndSettle();
+    expect(find.text('Purchases'), findsOneWidget);
+    expect(find.text('Suppliers'), findsOneWidget);
+    expect(find.text('Expenses'), findsOneWidget);
+    await tester.runAsync(() async {
+      await tester.tap(find.text('Reports'));
+      await tester.pump();
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+    });
+    await tester.pumpAndSettle();
+    expect(find.text('Business reports'), findsOneWidget);
+    expect(find.text('Net sales'), findsOneWidget);
+    expect(tester.takeException(), isNull);
     await tester.runAsync(() async {
       expect((await store.products()).single['shop'], 9);
       await store.db.close();

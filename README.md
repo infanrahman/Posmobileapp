@@ -1,17 +1,22 @@
 # Rihla POS
 
-An initial offline mobile app for Saudi retail shops and van salespeople. One Flutter codebase targets Android and iOS. All operational data stays in SQLite on the current device; no server, login, cloud fonts or online API is used by the app.
+An offline mobile app for Saudi retail shops and van salespeople. One Flutter codebase targets Android and iOS. All operational data stays in SQLite on the current device; no server, login, cloud fonts or online API is used by the app.
 
 ## Implemented
 
 - SAR prices and integer-halalah calculations; configurable tax-exclusive sales tax (starts at zero until configured).
-- Products with unique SKUs, opening quantities, stock receipts and low-stock indicators.
+- Products with unique SKUs, selling prices, purchase costs, editing, opening quantities, stock receipts and low-stock indicators.
 - Separate shop and van quantities, with transfers in either direction.
 - Cash/fully paid, partial-payment and credit sales. Credit requires a named customer.
 - Transactional checkout: invoice, immutable line prices, stock movements and initial payment are committed together.
+- Partial and complete sales returns, automatic stock restoration and customer refund calculation.
 - Customer details, area/route notes, balances, sales history and payment collection.
 - Sales ledger, on-device sales records, daily totals and seven-day chart.
+- Suppliers with contact and VAT details, payable balances and supplier payment recording.
+- Cash, partial and credit purchases that update stock and save the latest product cost.
+- Shop and van expenses, plus reports for sales, tax, gross profit, operating profit, receivables, payables and stock value.
 - Business-name and tax settings; data persists across app restarts.
+- Automatic schema migration preserves existing version 1 app data.
 
 The screenshots in `docs/` show isolated sample data. A fresh installation starts empty.
 
@@ -50,23 +55,26 @@ Release signing and store distribution are not configured. The generated Android
 
 1. Open **More → Business profile** and enter your business name and intended tax rate.
 2. Open **Stock → Add item**. Enter an item, unique SKU, SAR price and opening quantity.
-3. Tap an item to receive more stock or transfer shop stock to the van.
-4. Select **Van** to make a sale from the van's stock.
-5. Add a customer before creating partial or credit sales.
-6. Open **Sales → New sale**, choose the customer, add quantities and complete the sale.
-7. Open a sale to inspect its saved record or collect an outstanding payment.
-8. Close and reopen the app. The saved records and remaining quantities should remain available without internet.
+3. Tap an item to edit its prices, receive stock or transfer shop stock to the van.
+4. Open **More → Suppliers** to add a supplier, then **More → Purchases** to buy stock using cash, partial payment or credit.
+5. Select **Van** to make a sale from the van's stock.
+6. Add a customer before creating partial or credit sales.
+7. Open **Sales → New sale**, choose the customer, add quantities and complete the sale.
+8. Open a sale to inspect its saved record, return items or collect an outstanding payment.
+9. Record operating costs under **More → Expenses** and view totals under **More → Reports**.
+10. Close and reopen the app. The saved records and remaining quantities should remain available without internet.
 
 ## Architecture
 
 - `lib/store.dart`: schema, validation, money parsing and transactional database operations.
 - `lib/main.dart`: app theme, dashboard, inventory, customer ledger, settings and forms.
 - `lib/sale_screen.dart`: checkout and payment selection.
-- `test/store_test.dart`: calculations, rollback, location separation, concurrent overselling, credit collection, persistence and price snapshots.
-- `test/widget_test.dart`: phone-sized navigation and complete checkout with a real SQLite test database.
+- `lib/operations_screens.dart`: suppliers, purchases, expenses, reports and sales return screens.
+- `test/store_test.dart`: calculations, rollback, purchases, returns, reports, migration, concurrency, credit collection, persistence and price snapshots.
+- `test/widget_test.dart`: phone-sized navigation, complete checkout and reports with a real SQLite test database.
 - `test/preview_test.dart`: optional render with isolated demo data. Enabled by `RIHLA_PREVIEW_FONT`, pointing to a local font file; the font is never copied into the app.
 
-SQLite schema version 1 includes products, customers, sales, sale lines, stock movements, payments and settings. Queries bind user input. Dynamic stock columns are restricted to the internal `shop`/`van` allowlist. Prices and tax totals use integer arithmetic; tax is rounded once per invoice to the nearest halalah.
+SQLite schema version 2 includes products, customers, suppliers, sales, returns, purchases, expenses, stock movements, payments and settings. Queries bind user input. Dynamic stock columns are restricted to the internal `shop`/`van` allowlist. Prices and tax totals use integer arithmetic; tax is rounded to the nearest halalah.
 
 ## Scope before live business use
 
@@ -76,7 +84,7 @@ This is an initial working version, not a complete Vyapar replacement or a Saudi
 - Arabic translation and right-to-left layouts are not implemented.
 - No backup/restore, multi-device sync, user accounts or device recovery. Uninstalling the app can remove its data. Use test data at this stage.
 - Shop and van are two locations on **one device**, not shared real-time stock across different phones. No multiple-van identifiers or route scheduling yet.
-- Returns, cancellations, purchase orders, suppliers, expenses, discounts and product/customer editing are not implemented.
+- Purchase returns, sale cancellation, purchase orders, discounts and customer/supplier editing are not implemented.
 - No barcode camera, PDF export, receipt printer or payment terminal integration. Recording a payment does not process a card transaction.
 - The database is not encrypted; production device access controls and recovery policy remain to be designed.
 - Native Android/iOS device validation, airplane-mode testing, accessibility checks and release signing are still required.
@@ -84,9 +92,9 @@ This is an initial working version, not a complete Vyapar replacement or a Saudi
 SQLite platform reference: https://docs.flutter.dev/cookbook/persistence/sqlite
 
 
-## Validation on 10 September 2026
+## Validation on 12 September 2026
 
 - `flutter analyze`: no issues.
-- Automated tests: 11 passed with the optional preview enabled (9 database tests, 1 checkout UI test, 1 preview render).
-- Debug Android APK built successfully: `build/app/outputs/flutter-apk/app-debug.apk`.
-- Android and iOS were not run on physical devices. iOS compilation was not attempted on this Windows machine.
+- Automated tests: 15 passed and the optional preview test was skipped without a local preview font (14 database tests and 1 checkout/navigation UI test).
+- GitHub Actions builds the Android APK and unsigned iOS IPA on Linux and macOS runners after each push.
+- Android and iOS were not run on physical devices. A signed iOS IPA still requires an active paid Apple Developer Program team and repository signing secrets.

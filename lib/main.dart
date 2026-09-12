@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import 'store.dart';
 
 part 'sale_screen.dart';
+part 'operations_screens.dart';
 
 const ink = Color(0xFF172D36);
 const teal = Color(0xFF087F72);
@@ -338,10 +339,18 @@ class _HomeState extends State<Home> {
       final d = DateTime.parse(s['created'] as String).toLocal();
       return d.year == now.year && d.month == now.month && d.day == now.day;
     }).toList();
-    final revenue = today.fold(0, (n, row) => n + (row['total'] as int));
+    final revenue = today.fold(
+      0,
+      (n, row) => n + (row['total'] as int) - (row['returned'] as int),
+    );
     final due = localSales.fold(
       0,
-      (n, row) => n + (row['total'] as int) - (row['paid'] as int),
+      (n, row) =>
+          n +
+          (row['total'] as int) -
+          (row['returned'] as int) -
+          (row['paid'] as int) +
+          (row['refunded'] as int),
     );
     final low = products.where((p) => (p[location] as int) <= 5).toList();
     return [
@@ -584,7 +593,8 @@ class _HomeState extends State<Home> {
   }
 
   Widget saleTile(DbRow sale) {
-    final due = (sale['total'] as int) - (sale['paid'] as int);
+    final netTotal = (sale['total'] as int) - (sale['returned'] as int);
+    final due = netTotal - (sale['paid'] as int) + (sale['refunded'] as int);
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Card(
@@ -615,7 +625,7 @@ class _HomeState extends State<Home> {
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Text(
-                money(sale['total'] as int),
+                money(netTotal),
                 style: const TextStyle(fontWeight: FontWeight.w700),
               ),
               Text(
@@ -752,7 +762,49 @@ class _HomeState extends State<Home> {
   }
 
   List<Widget> morePage() => [
-    heading('Business settings', 'A simple workspace for your daily trade.'),
+    heading('Business tools', 'Purchases, expenses, suppliers and reports.'),
+    const SizedBox(height: 24),
+    Card(
+      child: Column(
+        children: [
+          ListTile(
+            leading: const Icon(Icons.shopping_cart_outlined, color: teal),
+            title: const Text('Purchases'),
+            subtitle: const Text('Receive stock and track supplier credit'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => openOperation(
+              PurchasesScreen(store: store!, location: location),
+            ),
+          ),
+          const Divider(height: 1),
+          ListTile(
+            leading: const Icon(Icons.local_shipping_outlined, color: teal),
+            title: const Text('Suppliers'),
+            subtitle: const Text('Contacts and payable balances'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => openOperation(SuppliersScreen(store: store!)),
+          ),
+          const Divider(height: 1),
+          ListTile(
+            leading: const Icon(Icons.payments_outlined, color: teal),
+            title: const Text('Expenses'),
+            subtitle: const Text('Record daily business costs'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => openOperation(
+              ExpensesScreen(store: store!, location: location),
+            ),
+          ),
+          const Divider(height: 1),
+          ListTile(
+            leading: const Icon(Icons.bar_chart_rounded, color: teal),
+            title: const Text('Reports'),
+            subtitle: const Text('Sales, profit, stock and balances'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => openOperation(ReportsScreen(store: store!)),
+          ),
+        ],
+      ),
+    ),
     const SizedBox(height: 24),
     Card(
       child: Column(
@@ -787,7 +839,7 @@ class _HomeState extends State<Home> {
       child: Padding(
         padding: EdgeInsets.all(20),
         child: Text(
-          'Early version • Local data is not yet backed up or shared between devices. Saudi e-invoicing integration, Arabic, returns and printer support are planned. Use sample business data while testing.',
+          'Local data is not yet backed up or shared between devices. Saudi e-invoicing, Arabic and printer support are planned. Use sample business data while testing.',
           style: TextStyle(color: Color(0xFF71818A), height: 1.6),
         ),
       ),
@@ -801,19 +853,32 @@ class _HomeState extends State<Home> {
       const Entry('Item name'),
       const Entry('SKU / barcode'),
       const Entry('Selling price (SAR)', initial: '0.00', numeric: true),
+      const Entry('Purchase cost (SAR)', initial: '0.00', numeric: true),
       const Entry('Opening quantity', initial: '0', numeric: true),
     ],
     (v) async {
-      final qty = int.tryParse(v[3]);
+      final qty = int.tryParse(v[4]);
       if (qty == null || qty < 0 || qty > 1000000) {
         throw const FormatException(
           'Enter an opening quantity from 0 to 1,000,000.',
         );
       }
-      await store!.addProduct(v[0], v[1], amount(v[2]), qty, location);
+      await store!.addProduct(
+        v[0],
+        v[1],
+        amount(v[2]),
+        qty,
+        location,
+        cost: amount(v[3]),
+      );
       await refresh();
     },
   );
+  Future<void> openOperation(Widget page) async {
+    await Navigator.push(context, MaterialPageRoute(builder: (_) => page));
+    await refresh();
+  }
+
   Future<void> addCustomer() => entryForm(
     context,
     'Add customer',
@@ -859,6 +924,11 @@ class _HomeState extends State<Home> {
               subtitle: Text('Shop: ${p['shop']} • Van: ${p['van']}'),
             ),
             ListTile(
+              leading: const Icon(Icons.edit_outlined),
+              title: const Text('Edit item details'),
+              onTap: () => Navigator.pop(c, 'edit'),
+            ),
+            ListTile(
               leading: const Icon(Icons.add_box_outlined),
               title: Text('Receive stock into $location'),
               onTap: () => Navigator.pop(c, 'receive'),
@@ -875,6 +945,37 @@ class _HomeState extends State<Home> {
       ),
     );
     if (choice == null || !mounted) return;
+    if (choice == 'edit') {
+      await entryForm(
+        context,
+        'Edit inventory item',
+        [
+          Entry('Item name', initial: p['name'] as String),
+          Entry('SKU / barcode', initial: p['sku'] as String),
+          Entry(
+            'Selling price (SAR)',
+            initial: ((p['price'] as int) / 100).toStringAsFixed(2),
+            numeric: true,
+          ),
+          Entry(
+            'Purchase cost (SAR)',
+            initial: ((p['cost'] as int) / 100).toStringAsFixed(2),
+            numeric: true,
+          ),
+        ],
+        (v) async {
+          await store!.updateProduct(
+            p['id'] as int,
+            v[0],
+            v[1],
+            amount(v[2]),
+            amount(v[3]),
+          );
+          await refresh();
+        },
+      );
+      return;
+    }
     await entryForm(
       context,
       choice == 'receive' ? 'Receive stock' : 'Transfer stock',
@@ -927,7 +1028,12 @@ class _HomeState extends State<Home> {
                     '${s['location']} • ${dateLabel(s['created'])}',
                   ),
                   trailing: Text(
-                    money((s['total'] as int) - (s['paid'] as int)),
+                    money(
+                      (s['total'] as int) -
+                          (s['returned'] as int) -
+                          (s['paid'] as int) +
+                          (s['refunded'] as int),
+                    ),
                   ),
                   onTap: () {
                     Navigator.pop(ctx);
@@ -945,7 +1051,7 @@ class _HomeState extends State<Home> {
   Future<void> receipt(DbRow sale) async {
     final lines = await store!.lines(sale['id'] as int);
     if (!mounted) return;
-    final collect = await showModalBottomSheet<bool>(
+    final action = await showModalBottomSheet<String>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
@@ -979,7 +1085,8 @@ class _HomeState extends State<Home> {
                   contentPadding: EdgeInsets.zero,
                   title: Text(line['name'] as String),
                   subtitle: Text(
-                    '${line['quantity']} × ${money(line['price'] as int)}',
+                    '${line['quantity']} × ${money(line['price'] as int)}'
+                    '${(line['returned'] as int) > 0 ? ' • ${line['returned']} returned' : ''}',
                   ),
                   trailing: Text(
                     money((line['quantity'] as int) * (line['price'] as int)),
@@ -993,19 +1100,40 @@ class _HomeState extends State<Home> {
                 sale['tax'] as int,
               ),
               totalRow('Total', sale['total'] as int, bold: true),
+              if ((sale['returned'] as int) > 0)
+                totalRow('Returns', -(sale['returned'] as int)),
               totalRow('Paid', sale['paid'] as int),
+              if ((sale['refunded'] as int) > 0)
+                totalRow('Refunded', -(sale['refunded'] as int)),
               totalRow(
                 'Balance due',
-                (sale['total'] as int) - (sale['paid'] as int),
+                (sale['total'] as int) -
+                    (sale['returned'] as int) -
+                    (sale['paid'] as int) +
+                    (sale['refunded'] as int),
                 bold: true,
               ),
               const SizedBox(height: 18),
-              if (sale['paid'] != sale['total'])
+              if ((sale['total'] as int) -
+                      (sale['returned'] as int) -
+                      (sale['paid'] as int) +
+                      (sale['refunded'] as int) >
+                  0)
                 FilledButton.icon(
-                  onPressed: () => Navigator.pop(ctx, true),
+                  onPressed: () => Navigator.pop(ctx, 'collect'),
                   icon: const Icon(Icons.payments_outlined),
                   label: const Text('Record payment'),
                 ),
+              if (lines.any(
+                (line) => (line['quantity'] as int) > (line['returned'] as int),
+              )) ...[
+                const SizedBox(height: 10),
+                OutlinedButton.icon(
+                  onPressed: () => Navigator.pop(ctx, 'return'),
+                  icon: const Icon(Icons.assignment_return_outlined),
+                  label: const Text('Return items'),
+                ),
+              ],
               const SizedBox(height: 16),
               const Text(
                 'Sales record for testing. Saudi e-invoicing is not configured.',
@@ -1017,15 +1145,42 @@ class _HomeState extends State<Home> {
         ),
       ),
     );
-    if (collect == true && mounted) {
+    if (action == 'return' && mounted) {
+      final quantities = await showModalBottomSheet<Map<int, int>>(
+        context: context,
+        showDragHandle: true,
+        isScrollControlled: true,
+        builder: (_) => ReturnSheet(lines: lines),
+      );
+      if (quantities != null && mounted) {
+        try {
+          final refund = await store!.returnSale(sale['id'] as int, quantities);
+          await refresh();
+          toast(
+            refund > 0
+                ? 'Return saved. Refund ${money(refund)} to the customer.'
+                : 'Return saved and stock restored.',
+          );
+        } catch (e) {
+          toast(
+            e is FormatException ? e.message : 'Could not save the return.',
+          );
+        }
+      }
+    }
+    if (action == 'collect' && mounted) {
+      final balance =
+          (sale['total'] as int) -
+          (sale['returned'] as int) -
+          (sale['paid'] as int) +
+          (sale['refunded'] as int);
       await entryForm(
         context,
         'Record customer payment',
         [
           Entry(
             'Amount received (SAR)',
-            initial: (((sale['total'] as int) - (sale['paid'] as int)) / 100)
-                .toStringAsFixed(2),
+            initial: (balance / 100).toStringAsFixed(2),
             numeric: true,
           ),
         ],
@@ -1073,7 +1228,10 @@ class SalesChart extends StatelessWidget {
                     date.month == day.month &&
                     date.day == day.day;
               })
-              .fold(0, (n, s) => n + (s['total'] as int)),
+              .fold(
+                0,
+                (n, s) => n + (s['total'] as int) - (s['returned'] as int),
+              ),
         )
         .toList();
     final max = totals.fold(1, (a, b) => a > b ? a : b);
