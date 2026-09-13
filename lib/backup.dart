@@ -5,6 +5,7 @@ import 'package:crypto/crypto.dart';
 import 'package:sqflite/sqflite.dart';
 
 import 'store.dart';
+import 'barcode.dart';
 
 // Parents precede children so foreign keys remain enabled throughout restore.
 const backupTables = [
@@ -45,7 +46,7 @@ class PosBackup {
       if (envelope is! Map ||
           envelope['format'] != 'rihla-pos-backup' ||
           envelope['format_version'] != 1 ||
-          ![2, 3].contains(envelope['database_version'])) {
+          ![2, 3, 4].contains(envelope['database_version'])) {
         throw const FormatException('This backup format is not supported.');
       }
       final payload = envelope['payload'];
@@ -82,6 +83,14 @@ class PosBackup {
               throw const FormatException('Invalid backup record.');
             }
             final defaults = <String, Object?>{};
+            if (envelope['database_version'] < 4 && table == 'products') {
+              if (row.containsKey('barcode')) {
+                throw const FormatException(
+                  'Backup record fields do not match this app.',
+                );
+              }
+              defaults['barcode'] = '';
+            }
             if (legacy) {
               if (table == 'sales' || table == 'sale_lines') {
                 defaults['discount'] = 0;
@@ -144,7 +153,7 @@ extension BackupOperations on PosStore {
         jsonEncode({
           'format': 'rihla-pos-backup',
           'format_version': 1,
-          'database_version': 3,
+          'database_version': 4,
           'payload': payload,
           'sha256': sha256.convert(utf8.encode(jsonEncode(payload))).toString(),
         }),
@@ -194,6 +203,10 @@ extension BackupOperations on PosStore {
                 row['location'] != 'shop' &&
                 row['location'] != 'van') {
               throw const FormatException('Backup stock location is invalid.');
+            }
+            if (table == 'products' &&
+                normalizeBarcode(row['barcode'] as String) != row['barcode']) {
+              throw const FormatException('Backup barcodes are invalid.');
             }
           }
         }

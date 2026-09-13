@@ -7,12 +7,14 @@ import 'backup.dart';
 import 'l10n.dart';
 import 'invoice_pdf.dart';
 import 'store.dart';
+import 'barcode.dart';
+import 'barcode_screen.dart';
 
 part 'sale_screen.dart';
 part 'operations_screens.dart';
 part 'backup_screen.dart';
 
-const appVersion = '0.4.0';
+const appVersion = '0.5.0';
 
 const ink = Color(0xFF172D36);
 const teal = Color(0xFF087F72);
@@ -682,7 +684,7 @@ class _HomeState extends State<Home> {
 
   List<Widget> stockPage() {
     final filtered = products
-        .where((p) => matches(p, ['name', 'sku']))
+        .where((p) => matches(p, ['name', 'sku', 'barcode']))
         .toList();
     return [
       heading(
@@ -690,6 +692,19 @@ class _HomeState extends State<Home> {
         'Receive stock or transfer between shop and van.',
       ),
       searchField('Search item name or SKU'),
+      OutlinedButton.icon(
+        icon: const Icon(Icons.qr_code_scanner),
+        label: const UiText('Scan barcode'),
+        onPressed: () async {
+          final code = await scanBarcode(context);
+          if (code == null || !mounted) return;
+          try {
+            await stockActions(productForBarcode(products, code));
+          } on FormatException catch (e) {
+            if (mounted) toast(e.message);
+          }
+        },
+      ),
       if (filtered.isEmpty)
         empty(
           Icons.inventory_2_outlined,
@@ -934,10 +949,11 @@ class _HomeState extends State<Home> {
     'Add inventory item',
     [
       const Entry('Item name'),
-      const Entry('SKU / barcode'),
+      const Entry('SKU / barcode', scan: true),
       const Entry('Selling price (SAR)', initial: '0.00', numeric: true),
       const Entry('Purchase cost (SAR)', initial: '0.00', numeric: true),
       const Entry('Opening quantity', initial: '0', numeric: true),
+      const Entry('Barcode (optional)', scan: true),
     ],
     (v) async {
       final qty = int.tryParse(v[4]);
@@ -953,6 +969,7 @@ class _HomeState extends State<Home> {
         qty,
         location,
         cost: amount(v[3]),
+        barcode: v[5],
       );
       await refresh();
     },
@@ -1034,7 +1051,7 @@ class _HomeState extends State<Home> {
         'Edit inventory item',
         [
           Entry('Item name', initial: p['name'] as String),
-          Entry('SKU / barcode', initial: p['sku'] as String),
+          Entry('SKU / barcode', initial: p['sku'] as String, scan: true),
           Entry(
             'Selling price (SAR)',
             initial: ((p['price'] as int) / 100).toStringAsFixed(2),
@@ -1045,6 +1062,11 @@ class _HomeState extends State<Home> {
             initial: ((p['cost'] as int) / 100).toStringAsFixed(2),
             numeric: true,
           ),
+          Entry(
+            'Barcode (optional)',
+            initial: p['barcode'] as String,
+            scan: true,
+          ),
         ],
         (v) async {
           await store!.updateProduct(
@@ -1053,6 +1075,7 @@ class _HomeState extends State<Home> {
             v[1],
             amount(v[2]),
             amount(v[3]),
+            barcode: v[4],
           );
           await refresh();
         },
@@ -1476,8 +1499,13 @@ class SalesChart extends StatelessWidget {
 
 class Entry {
   final String label, initial;
-  final bool numeric;
-  const Entry(this.label, {this.initial = '', this.numeric = false});
+  final bool numeric, scan;
+  const Entry(
+    this.label, {
+    this.initial = '',
+    this.numeric = false,
+    this.scan = false,
+  });
 }
 
 Future<void> entryForm(
@@ -1536,6 +1564,8 @@ class _EntrySheetState extends State<EntrySheet> {
           busy = false;
           error = e is FormatException
               ? e.message
+              : '$e'.contains('products.barcode')
+              ? 'This barcode already belongs to another product.'
               : '$e'.contains('UNIQUE')
               ? 'This SKU already exists. Use a different SKU.'
               : 'Could not save. Your changes were not applied. Please try again.';
@@ -1576,6 +1606,20 @@ class _EntrySheetState extends State<EntrySheet> {
                         : TextInputType.text,
                     decoration: InputDecoration(
                       labelText: tr(context, widget.fields[i].label),
+                      suffixIcon: widget.fields[i].scan
+                          ? IconButton(
+                              tooltip: tr(context, 'Scan barcode'),
+                              icon: const Icon(Icons.qr_code_scanner),
+                              onPressed: busy
+                                  ? null
+                                  : () async {
+                                      final code = await scanBarcode(context);
+                                      if (code != null && mounted) {
+                                        controllers[i].text = code;
+                                      }
+                                    },
+                            )
+                          : null,
                     ),
                     textInputAction: i == widget.fields.length - 1
                         ? TextInputAction.done

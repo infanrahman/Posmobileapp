@@ -438,4 +438,26 @@ const arabic = <String, String>{
       'المخزون غير كافٍ في موقع الشراء الأصلي.',
   '{quantity} × {price} • {returned} returned':
       '{quantity} × {price} • المرتجع: {returned}',
+  'Scan barcode': 'مسح الباركود',
+  'Barcode (optional)': 'الباركود (اختياري)',
+  'Barcode / SKU': 'الباركود / رمز الصنف',
+  'Enter code manually': 'إدخال الرمز يدوياً',
+  'Use code': 'استخدام الرمز',
+  'Use camera': 'استخدام الكاميرا',
+  'Show one barcode at a time.': 'اعرض باركوداً واحداً في كل مرة.',
+  'Enter or scan a barcode.': 'أدخل الباركود أو امسحه.',
+  'Enter a barcode with up to 128 characters on one line.':
+      'أدخل باركوداً حتى ١٢٨ حرفاً في سطر واحد.',
+  'No product matches this code. Add its barcode in Stock first.':
+      'لا يوجد صنف مطابق. أضف باركوده في المخزون أولاً.',
+  'This code matches multiple products. Check their barcodes and SKUs in Stock.':
+      'يطابق الرمز عدة أصناف. راجع الباركود ورموز الأصناف في المخزون.',
+  'This barcode already belongs to another product.':
+      'هذا الباركود مرتبط بصنف آخر.',
+  'Backup barcodes are invalid.': 'باركودات النسخة الاحتياطية غير صالحة.',
+  'Added {name} to the sale.': 'أُضيف {name} إلى البيع.',
+  'Camera unavailable. Allow camera access in your phone settings, or enter the code manually.':
+      'الكاميرا غير متاحة. اسمح بالوصول إليها في إعدادات الهاتف أو أدخل الرمز يدوياً.',
+  'Point the camera at one product barcode. Scanning works offline.':
+      'وجّه الكاميرا إلى باركود صنف واحد. يعمل المسح دون إنترنت.',
 };

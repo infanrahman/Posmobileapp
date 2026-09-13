@@ -1,5 +1,6 @@
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
+import 'barcode.dart';
 
 typedef DbRow = Map<String, Object?>;
 
@@ -51,7 +52,7 @@ class PosStore {
     final database = await f.openDatabase(
       path ?? p.join(await f.getDatabasesPath(), 'rihla.db'),
       options: OpenDatabaseOptions(
-        version: 3,
+        version: 4,
         onConfigure: (db) async {
           await db.execute('PRAGMA foreign_keys = ON');
         },
@@ -100,6 +101,7 @@ class PosStore {
           await db.insert('settings', {'key': 'tax_bps', 'value': '0'});
           await _createOperations(db);
           await _upgradeTrading(db);
+          await _upgradeBarcodes(db);
         },
         onUpgrade: (db, oldVersion, newVersion) async {
           if (oldVersion < 2) {
@@ -121,6 +123,7 @@ class PosStore {
             await _createOperations(db);
           }
           if (oldVersion < 3) await _upgradeTrading(db);
+          if (oldVersion < 4) await _upgradeBarcodes(db);
         },
       ),
     );
@@ -147,6 +150,15 @@ class PosStore {
       id INTEGER PRIMARY KEY, purchase_id INTEGER NOT NULL REFERENCES purchases(id),
       created TEXT NOT NULL, total INTEGER NOT NULL CHECK(total >= 0),
       refund INTEGER NOT NULL CHECK(refund >= 0 AND refund <= total))''');
+  }
+
+  static Future<void> _upgradeBarcodes(DatabaseExecutor db) async {
+    await db.execute(
+      "ALTER TABLE products ADD COLUMN barcode TEXT NOT NULL DEFAULT ''",
+    );
+    await db.execute(
+      "CREATE UNIQUE INDEX product_barcode_unique ON products(barcode) WHERE barcode != ''",
+    );
   }
 
   static Future<void> _createOperations(DatabaseExecutor db) async {
@@ -241,6 +253,7 @@ class PosStore {
     int stock,
     String location, {
     int cost = 0,
+    String barcode = '',
   }) async {
     _location(location);
     if (name.trim().isEmpty ||
@@ -258,6 +271,7 @@ class PosStore {
         'sku': sku.trim().toUpperCase(),
         'price': price,
         'cost': cost,
+        'barcode': normalizeBarcode(barcode),
         location: stock,
       });
       if (stock > 0) await _movement(tx, id, location, stock, 'Opening stock');
@@ -269,8 +283,9 @@ class PosStore {
     String name,
     String sku,
     int price,
-    int cost,
-  ) async {
+    int cost, {
+    String? barcode,
+  }) async {
     if (name.trim().isEmpty || sku.trim().isEmpty || price < 0 || cost < 0) {
       throw const FormatException(
         'Name, unique SKU, cost and price are required.',
@@ -283,6 +298,7 @@ class PosStore {
         'sku': sku.trim().toUpperCase(),
         'price': price,
         'cost': cost,
+        if (barcode != null) 'barcode': normalizeBarcode(barcode),
       },
       where: 'id=?',
       whereArgs: [id],

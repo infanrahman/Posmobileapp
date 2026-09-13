@@ -407,6 +407,7 @@ class _PurchaseEditorState extends State<PurchaseEditor> {
   int? supplier;
   String paymentMode = 'paid', query = '';
   bool loading = true, saving = false;
+  bool scanning = false;
   String? error;
   int get total => products.fold(0, (sum, p) {
     final item = cart[p['id']];
@@ -461,6 +462,24 @@ class _PurchaseEditorState extends State<PurchaseEditor> {
     );
   }
 
+  Future<void> scanItem() async {
+    if (scanning || saving) return;
+    scanning = true;
+    try {
+      final code = await scanBarcode(context);
+      if (code == null || !mounted) return;
+      await editItem(productForBarcode(products, code));
+    } on FormatException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: UiText(e.message)));
+      }
+    } finally {
+      scanning = false;
+    }
+  }
+
   Future<void> save() async {
     setState(() {
       saving = true;
@@ -498,7 +517,7 @@ class _PurchaseEditorState extends State<PurchaseEditor> {
   @override
   Widget build(BuildContext context) {
     final filtered = products.where(
-      (p) => '${p['name']} ${p['sku']}'.toLowerCase().contains(
+      (p) => '${p['name']} ${p['sku']} ${p['barcode']}'.toLowerCase().contains(
         query.toLowerCase(),
       ),
     );
@@ -536,6 +555,11 @@ class _PurchaseEditorState extends State<PurchaseEditor> {
                     decoration: InputDecoration(
                       hintText: tr(context, 'Search products'),
                       prefixIcon: Icon(Icons.search),
+                      suffixIcon: IconButton(
+                        tooltip: tr(context, 'Scan barcode'),
+                        icon: const Icon(Icons.qr_code_scanner),
+                        onPressed: saving ? null : scanItem,
+                      ),
                     ),
                     onChanged: (v) => setState(() => query = v),
                   ),

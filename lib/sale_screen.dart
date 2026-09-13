@@ -22,6 +22,7 @@ class _SaleScreenState extends State<SaleScreen> {
   String query = '', paymentMode = 'paid';
   int? customer;
   bool loading = true, saving = false;
+  bool scanning = false;
   String? error;
   int get taxBps => int.parse(widget.settings['tax_bps'] ?? '0');
   int get itemsTotal => products.fold(
@@ -141,6 +142,32 @@ class _SaleScreenState extends State<SaleScreen> {
     }
   }
 
+  Future<void> scanItem() async {
+    if (scanning || saving) return;
+    scanning = true;
+    try {
+      final code = await scanBarcode(context);
+      if (code == null || !mounted) return;
+      final product = productForBarcode(products, code);
+      final canAdd =
+          (cart[product['id']] ?? 0) < (product[widget.location] as int);
+      change(product, 1);
+      if (canAdd) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: UiText('Added ${product['name']} to the sale.')),
+        );
+      }
+    } on FormatException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: UiText(e.message)));
+      }
+    } finally {
+      scanning = false;
+    }
+  }
+
   Future<void> close() async {
     if (cart.isEmpty) {
       Navigator.pop(context);
@@ -175,9 +202,9 @@ class _SaleScreenState extends State<SaleScreen> {
   Widget build(BuildContext context) {
     final filtered = products
         .where(
-          (p) => '${p['name']} ${p['sku']}'.toLowerCase().contains(
-            query.toLowerCase(),
-          ),
+          (p) => '${p['name']} ${p['sku']} ${p['barcode']}'
+              .toLowerCase()
+              .contains(query.toLowerCase()),
         )
         .toList();
     return PopScope(
@@ -248,6 +275,11 @@ class _SaleScreenState extends State<SaleScreen> {
                             decoration: InputDecoration(
                               hintText: tr(context, 'Search item or SKU'),
                               prefixIcon: Icon(Icons.search),
+                              suffixIcon: IconButton(
+                                tooltip: tr(context, 'Scan barcode'),
+                                icon: const Icon(Icons.qr_code_scanner),
+                                onPressed: saving ? null : scanItem,
+                              ),
                             ),
                             onChanged: (v) => setState(() => query = v),
                           ),

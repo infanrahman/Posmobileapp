@@ -6,6 +6,7 @@ An offline mobile app for Saudi retail shops and van salespeople. One Flutter co
 
 - SAR prices and integer-halalah calculations; configurable tax-exclusive sales tax (starts at zero until configured).
 - Products with unique SKUs, selling prices, purchase costs, editing, opening quantities, stock receipts and low-stock indicators.
+- Camera barcode scanning in sales, purchases and inventory, with optional unique product barcodes separate from existing SKUs. Manual code entry remains available if camera access is denied. Recognition is bundled on Android for offline use from first launch; iOS uses native recognition.
 - Separate shop and van quantities, with transfers in either direction.
 - Cash/fully paid, partial-payment and credit sales. Credit requires a named customer.
 - Transactional checkout: invoice, immutable line prices, stock movements and initial payment are committed together.
@@ -74,7 +75,9 @@ Release signing and store distribution are not configured. The generated Android
 13. Open a customer and choose **Edit customer**; tap a supplier to edit its details. Existing invoice names remain as originally saved.
 14. Open a purchase and choose **Return purchase items**. Choose quantities, check the return value and refund, then confirm after any displayed supplier refund is received.
 15. Enter **Discount (SAR)** in a new sale to reduce its tax-exclusive subtotal. Discounts must not exceed the items total.
-16. Close and reopen the app. The saved records, language and quantities remain available without internet. **More** shows the installed app version; this release is **0.4.0 (build 4)**.
+16. Add or edit a stock item and fill **Barcode (optional)** by typing or using its scan button. Existing **SKU / barcode** values can also be matched. A barcode belongs to one product; ambiguous barcode/SKU matches are rejected.
+17. Tap the scan icon in a new sale to add one unit. Tap it in a new purchase to open the item's quantity and cost form. Inventory scanning opens the matching item's actions. Unknown codes never create or modify products automatically. Show one barcode at a time; reopen the scanner to add another unit.
+18. Close and reopen the app. The saved records, language and quantities remain available without internet. **More** shows the installed app version; this release is **0.5.0 (build 5)**.
 
 ## Architecture
 
@@ -85,11 +88,14 @@ Release signing and store distribution are not configured. The generated Android
 - `lib/backup.dart` and `lib/backup_screen.dart`: complete database snapshots, validation, atomic restore and native file selection.
 - `lib/l10n.dart`: Arabic interface translations and dynamic labels; user-entered product and business names remain unchanged.
 - `lib/invoice_pdf.dart`: offline invoice PDFs using bundled Amiri fonts.
+- `lib/barcode.dart` and `lib/barcode_screen.dart`: code matching, single-result camera capture, lifecycle management and manual entry.
 - `test/store_test.dart`: calculations, rollback, purchases, returns, reports, migration, concurrency, credit collection, persistence and price snapshots.
 - `test/widget_test.dart`: phone-sized navigation, complete checkout and reports with a real SQLite test database.
 - `test/preview_test.dart`: optional render with isolated demo data. Enabled by `RIHLA_PREVIEW_FONT`, pointing to a local font file; the font is never copied into the app.
 
-SQLite schema version 3 includes products, customers, suppliers, sales, both types of returns, purchases, expenses, stock movements, payments and settings. Upgrades from versions 1 and 2 preserve existing records. Backups from app version 0.3.0 (schema 2) can still be restored; new backups require this app version or later. Queries bind user input. Dynamic stock columns are restricted to the internal `shop`/`van` allowlist. Prices and tax totals use integer arithmetic; tax is rounded to the nearest halalah.
+SQLite schema version 4 includes products, customers, suppliers, sales, both types of returns, purchases, expenses, stock movements, payments and settings. Upgrades from versions 1, 2 and 3 preserve existing records. Backups from app versions 0.3.0 and 0.4.0 (schemas 2 and 3) can still be restored; new backups require this app version or later. Queries bind user input. Dynamic stock columns are restricted to the internal `shop`/`van` allowlist. Prices and tax totals use integer arithmetic; tax is rounded to the nearest halalah.
+
+Barcodes remain text, preserving leading zeroes. UPC-A and its zero-prefixed EAN-13 representation share a key for matching across devices. Barcode values are case-sensitive; SKU matching is case-insensitive. Camera frames are not saved or uploaded by this app. The scanner requests camera access only when opened. See the [scanner package documentation](https://pub.dev/packages/mobile_scanner) for native format support.
 
 ## Scope before live business use
 
@@ -99,7 +105,7 @@ This is an initial working version, not a complete Vyapar replacement or a Saudi
 - No multi-device sync or user accounts. Uninstalling the app can remove its data; keep manual backups outside the app. Restoring a backup replaces current records.
 - Shop and van are two locations on **one device**, not shared real-time stock across different phones. No multiple-van identifiers or route scheduling yet.
 - Sale cancellation, purchase orders and percentage discounts are not implemented.
-- No barcode camera, thermal receipt printer or payment terminal integration. Recording a payment does not process a card transaction.
+- No thermal receipt printer or payment terminal integration. Recording a payment does not process a card transaction.
 - The database is not encrypted; production device access controls and recovery policy remain to be designed.
 - Native Android/iOS device validation, airplane-mode testing, accessibility checks and release signing are still required.
 
@@ -112,5 +118,6 @@ SQLite platform reference: https://docs.flutter.dev/cookbook/persistence/sqlite
 - Automated tests cover database operations and migration, checkout navigation, backup round trips and rollback, native file flow with a test picker, Arabic persistence and PDF generation. The optional dashboard preview test requires a local preview font.
 - English and Arabic invoice PDFs were rendered and visually inspected using sample records.
 - Trading regression tests cover saved contact snapshots, discounts and split returns, supplier refunds, stock rollback, schema 2 migration and legacy backup restore.
+- Scanner tests use a simulated native camera to check duplicate events, multiple visible codes, background/resume behavior, unknown codes, stock limits, permission denial and manual entry. Barcode migration and legacy backup compatibility are tested. Real camera focus, physical label recognition and permission prompts still require iPhone/Android device checks, including airplane mode.
 - GitHub Actions builds the Android APK and unsigned iOS IPA on Linux and macOS runners after each push.
 - Android and iOS were not run on physical devices. A signed iOS IPA still requires an active paid Apple Developer Program team and repository signing secrets.
