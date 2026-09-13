@@ -12,7 +12,7 @@ part 'sale_screen.dart';
 part 'operations_screens.dart';
 part 'backup_screen.dart';
 
-const appVersion = '0.3.0';
+const appVersion = '0.4.0';
 
 const ink = Color(0xFF172D36);
 const teal = Color(0xFF087F72);
@@ -1099,6 +1099,31 @@ class _HomeState extends State<Home> {
                 style: Theme.of(ctx).textTheme.titleLarge,
               ),
               UiText('${c['phone']}  ${c['area']}'),
+              OutlinedButton.icon(
+                icon: const Icon(Icons.edit_outlined),
+                label: const UiText('Edit customer'),
+                onPressed: () async {
+                  Navigator.pop(ctx);
+                  await entryForm(
+                    context,
+                    'Edit customer',
+                    [
+                      Entry('Customer name', initial: c['name'] as String),
+                      Entry('Phone number', initial: c['phone'] as String),
+                      Entry('Area / route', initial: c['area'] as String),
+                    ],
+                    (v) async {
+                      await store!.updateCustomer(
+                        c['id'] as int,
+                        v[0],
+                        v[1],
+                        v[2],
+                      );
+                      await refresh();
+                    },
+                  );
+                },
+              ),
               const SizedBox(height: 12),
               UiText('Outstanding: ${money(c['balance'] as int)}'),
               const SizedBox(height: 20),
@@ -1172,11 +1197,21 @@ class _HomeState extends State<Home> {
                     '${(line['returned'] as int) > 0 ? ' • ${line['returned']} returned' : ''}',
                   ),
                   trailing: UiText(
-                    money((line['quantity'] as int) * (line['price'] as int)),
+                    money(
+                      (line['quantity'] as int) * (line['price'] as int) -
+                          (line['discount'] as int),
+                    ),
                   ),
                 ),
               ),
               const Divider(),
+              if ((sale['discount'] as int) > 0) ...[
+                totalRow(
+                  'Items total',
+                  (sale['subtotal'] as int) + (sale['discount'] as int),
+                ),
+                totalRow('Discount', -(sale['discount'] as int)),
+              ],
               totalRow('Subtotal', sale['subtotal'] as int),
               totalRow(
                 'Tax (${(sale['tax_bps'] as int) / 100}%)',

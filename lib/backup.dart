@@ -21,6 +21,7 @@ const backupTables = [
   'movements',
   'expenses',
   'sale_returns',
+  'purchase_returns',
 ];
 
 const maxBackupBytes = 25 * 1024 * 1024;
@@ -44,7 +45,7 @@ class PosBackup {
       if (envelope is! Map ||
           envelope['format'] != 'rihla-pos-backup' ||
           envelope['format_version'] != 1 ||
-          envelope['database_version'] != 2) {
+          ![2, 3].contains(envelope['database_version'])) {
         throw const FormatException('This backup format is not supported.');
       }
       final payload = envelope['payload'];
@@ -55,15 +56,23 @@ class PosBackup {
       }
       final created = payload['created'];
       final rows = payload['tables'];
+      final legacy = envelope['database_version'] == 2;
+      final expectedTables = backupTables
+          .where((t) => !legacy || t != 'purchase_returns')
+          .toList();
       if (created is! String ||
           DateTime.tryParse(created) == null ||
           rows is! Map ||
-          rows.length != backupTables.length ||
-          !backupTables.every(rows.containsKey)) {
+          rows.length != expectedTables.length ||
+          !expectedTables.every(rows.containsKey)) {
         throw const FormatException('The backup is missing required records.');
       }
       final tables = <String, List<DbRow>>{};
       for (final table in backupTables) {
+        if (legacy && table == 'purchase_returns') {
+          tables[table] = const [];
+          continue;
+        }
         if (rows[table] is! List) {
           throw const FormatException('Invalid backup records.');
         }
@@ -72,7 +81,22 @@ class PosBackup {
             if (row is! Map<String, dynamic>) {
               throw const FormatException('Invalid backup record.');
             }
-            return Map<String, Object?>.unmodifiable(row);
+            final defaults = <String, Object?>{};
+            if (legacy) {
+              if (table == 'sales' || table == 'sale_lines') {
+                defaults['discount'] = 0;
+              }
+              if (table == 'purchases' || table == 'purchase_lines') {
+                defaults['returned'] = 0;
+              }
+              if (table == 'purchases') defaults['refunded'] = 0;
+              if (defaults.keys.any(row.containsKey)) {
+                throw const FormatException(
+                  'Backup record fields do not match this app.',
+                );
+              }
+            }
+            return Map<String, Object?>.unmodifiable({...row, ...defaults});
           }),
         );
       }
@@ -120,7 +144,7 @@ extension BackupOperations on PosStore {
         jsonEncode({
           'format': 'rihla-pos-backup',
           'format_version': 1,
-          'database_version': 2,
+          'database_version': 3,
           'payload': payload,
           'sha256': sha256.convert(utf8.encode(jsonEncode(payload))).toString(),
         }),
@@ -203,13 +227,15 @@ extension BackupOperations on PosStore {
 Future<void> _validateRestoredLedgers(Transaction tx) async {
   const checks = [
     '''SELECT id FROM sale_lines WHERE quantity<=0 OR price<0 OR cost<0
-       OR returned<0 OR returned>quantity''',
+       OR returned<0 OR returned>quantity OR discount<0 OR discount>quantity*price''',
     '''SELECT id FROM sales s WHERE subtotal<0 OR tax_bps<0 OR tax_bps>10000
        OR tax != (subtotal*tax_bps+5000)/10000 OR total!=subtotal+tax
        OR returned<0 OR refunded<0 OR returned>total OR refunded>paid
        OR total-returned-paid+refunded<0
        OR (customer_id IS NULL AND total-returned-paid+refunded!=0)
-       OR subtotal!=COALESCE((SELECT SUM(quantity*price) FROM sale_lines WHERE sale_id=s.id),0)
+       OR subtotal!=COALESCE((SELECT SUM(quantity*price-discount) FROM sale_lines WHERE sale_id=s.id),0)
+       OR discount!=COALESCE((SELECT SUM(discount) FROM sale_lines WHERE sale_id=s.id),0)
+       OR COALESCE((SELECT SUM(subtotal) FROM sale_returns WHERE sale_id=s.id),0)!=COALESCE((SELECT SUM(price*returned-discount*returned/quantity) FROM sale_lines WHERE sale_id=s.id),0)
        OR paid!=COALESCE((SELECT SUM(amount) FROM payments WHERE sale_id=s.id),0)
        OR returned!=COALESCE((SELECT SUM(total) FROM sale_returns WHERE sale_id=s.id),0)
        OR refunded!=COALESCE((SELECT SUM(refund) FROM sale_returns WHERE sale_id=s.id),0)''',
@@ -218,7 +244,13 @@ Future<void> _validateRestoredLedgers(Transaction tx) async {
     '''SELECT id FROM purchases p WHERE
        total!=COALESCE((SELECT SUM(quantity*cost) FROM purchase_lines WHERE purchase_id=p.id),0)
        OR paid!=COALESCE((SELECT SUM(amount) FROM supplier_payments WHERE purchase_id=p.id),0)
-       OR (supplier_id IS NULL AND total!=paid)''',
+       OR returned<0 OR refunded<0 OR returned>total OR refunded>paid
+       OR total-returned-paid+refunded<0
+       OR (supplier_id IS NULL AND total-returned-paid+refunded!=0)
+       OR returned!=COALESCE((SELECT SUM(total) FROM purchase_returns WHERE purchase_id=p.id),0)
+       OR refunded!=COALESCE((SELECT SUM(refund) FROM purchase_returns WHERE purchase_id=p.id),0)
+       OR returned!=COALESCE((SELECT SUM(returned*cost) FROM purchase_lines WHERE purchase_id=p.id),0)''',
+    '''SELECT id FROM purchase_lines WHERE returned<0 OR returned>quantity''',
   ];
   for (final sql in checks) {
     if ((await tx.rawQuery('$sql LIMIT 1')).isNotEmpty) {

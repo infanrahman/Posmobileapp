@@ -47,7 +47,7 @@ Future<Uint8List> createInvoicePdf({
     label('Qty', 'الكمية'),
     label('Unit price', 'سعر الوحدة'),
     label('Returned', 'المرتجع'),
-    label('Original total', 'الإجمالي الأصلي'),
+    label('Line total', 'إجمالي الصنف'),
   ];
   pw.TableRow row(List<String> values, {bool header = false}) => pw.TableRow(
     repeat: header,
@@ -121,16 +121,26 @@ Future<Uint8List> createInvoicePdf({
             row(headers, header: true),
             ...lines.map(
               (line) => row([
-                line['name'] as String,
+                '${line['name']}${((line['discount'] as int?) ?? 0) > 0 ? '\n${label('Discount', 'الخصم')}: ${cash(line['discount'] as int)}' : ''}',
                 '${line['quantity']}',
                 cash(line['price'] as int),
                 '${line['returned']}',
-                cash((line['quantity'] as int) * (line['price'] as int)),
+                cash(
+                  (line['quantity'] as int) * (line['price'] as int) -
+                      ((line['discount'] as int?) ?? 0),
+                ),
               ]),
             ),
           ],
         ),
         pw.SizedBox(height: 18),
+        if (((sale['discount'] as int?) ?? 0) > 0) ...[
+          total(
+            label('Items total', 'إجمالي الأصناف'),
+            (sale['subtotal'] as int) + (sale['discount'] as int),
+          ),
+          total(label('Discount', 'الخصم'), -(sale['discount'] as int)),
+        ],
         total(label('Subtotal', 'المجموع الفرعي'), sale['subtotal'] as int),
         total(
           '${label('Tax', 'الضريبة')} (${(sale['tax_bps'] as int) / 100}%)',

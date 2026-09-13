@@ -11,9 +11,12 @@ An offline mobile app for Saudi retail shops and van salespeople. One Flutter co
 - Transactional checkout: invoice, immutable line prices, stock movements and initial payment are committed together.
 - Partial and complete sales returns, automatic stock restoration and customer refund calculation.
 - Customer details, area/route notes, balances, sales history and payment collection.
+- Edit customer and supplier contact details while retaining names saved on earlier invoices.
 - Sales ledger, on-device sales records, daily totals and seven-day chart.
 - Suppliers with contact and VAT details, payable balances and supplier payment recording.
 - Cash, partial and credit purchases that update stock and save the latest product cost.
+- Partial/full purchase returns remove stock from the original location, reduce supplier debt and record refunds received. Confirm a cash refund only after receiving it from the supplier. Returns retain original costs and do not recalculate the current product cost.
+- Fixed SAR discounts before sales tax, allocated across invoice lines. Profit reports, PDFs and partial sales returns use the saved discounted amounts with integer rounding.
 - Shop and van expenses, plus reports for sales, tax, gross profit, operating profit, receivables, payables and stock value.
 - Business-name and tax settings; data persists across app restarts.
 - Automatic schema migration preserves existing version 1 app data.
@@ -68,7 +71,10 @@ Release signing and store distribution are not configured. The generated Android
 10. Open a sale and choose **Save PDF** or **Share PDF**.
 11. Choose **More → Language → العربية** to use the Arabic interface.
 12. Choose **More → Backup and restore → Save backup** to save a JSON file outside the app. Restore previews the backup and requires **Replace records**; it replaces all device records rather than merging them. Save the current records first if you need to keep them. Files are limited to 25 MB, are not encrypted and should be kept privately. Local folders work offline; cloud file providers may need internet.
-13. Close and reopen the app. The saved records, language and quantities remain available without internet. **More** shows the installed app version; this release is **0.3.0 (build 3)**.
+13. Open a customer and choose **Edit customer**; tap a supplier to edit its details. Existing invoice names remain as originally saved.
+14. Open a purchase and choose **Return purchase items**. Choose quantities, check the return value and refund, then confirm after any displayed supplier refund is received.
+15. Enter **Discount (SAR)** in a new sale to reduce its tax-exclusive subtotal. Discounts must not exceed the items total.
+16. Close and reopen the app. The saved records, language and quantities remain available without internet. **More** shows the installed app version; this release is **0.4.0 (build 4)**.
 
 ## Architecture
 
@@ -83,7 +89,7 @@ Release signing and store distribution are not configured. The generated Android
 - `test/widget_test.dart`: phone-sized navigation, complete checkout and reports with a real SQLite test database.
 - `test/preview_test.dart`: optional render with isolated demo data. Enabled by `RIHLA_PREVIEW_FONT`, pointing to a local font file; the font is never copied into the app.
 
-SQLite schema version 2 includes products, customers, suppliers, sales, returns, purchases, expenses, stock movements, payments and settings. Queries bind user input. Dynamic stock columns are restricted to the internal `shop`/`van` allowlist. Prices and tax totals use integer arithmetic; tax is rounded to the nearest halalah.
+SQLite schema version 3 includes products, customers, suppliers, sales, both types of returns, purchases, expenses, stock movements, payments and settings. Upgrades from versions 1 and 2 preserve existing records. Backups from app version 0.3.0 (schema 2) can still be restored; new backups require this app version or later. Queries bind user input. Dynamic stock columns are restricted to the internal `shop`/`van` allowlist. Prices and tax totals use integer arithmetic; tax is rounded to the nearest halalah.
 
 ## Scope before live business use
 
@@ -92,7 +98,7 @@ This is an initial working version, not a complete Vyapar replacement or a Saudi
 - Saudi e-invoicing/ZATCA integration, compliant invoice output and applicable validation are not implemented. Sales records are explicitly labelled for testing.
 - No multi-device sync or user accounts. Uninstalling the app can remove its data; keep manual backups outside the app. Restoring a backup replaces current records.
 - Shop and van are two locations on **one device**, not shared real-time stock across different phones. No multiple-van identifiers or route scheduling yet.
-- Purchase returns, sale cancellation, purchase orders, discounts and customer/supplier editing are not implemented.
+- Sale cancellation, purchase orders and percentage discounts are not implemented.
 - No barcode camera, thermal receipt printer or payment terminal integration. Recording a payment does not process a card transaction.
 - The database is not encrypted; production device access controls and recovery policy remain to be designed.
 - Native Android/iOS device validation, airplane-mode testing, accessibility checks and release signing are still required.
@@ -100,10 +106,11 @@ This is an initial working version, not a complete Vyapar replacement or a Saudi
 SQLite platform reference: https://docs.flutter.dev/cookbook/persistence/sqlite
 
 
-## Validation on 12 September 2026
+## Validation on 13 September 2026
 
 - `flutter analyze`: no issues.
 - Automated tests cover database operations and migration, checkout navigation, backup round trips and rollback, native file flow with a test picker, Arabic persistence and PDF generation. The optional dashboard preview test requires a local preview font.
 - English and Arabic invoice PDFs were rendered and visually inspected using sample records.
+- Trading regression tests cover saved contact snapshots, discounts and split returns, supplier refunds, stock rollback, schema 2 migration and legacy backup restore.
 - GitHub Actions builds the Android APK and unsigned iOS IPA on Linux and macOS runners after each push.
 - Android and iOS were not run on physical devices. A signed iOS IPA still requires an active paid Apple Developer Program team and repository signing secrets.

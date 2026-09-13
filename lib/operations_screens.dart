@@ -40,6 +40,26 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
       await load();
     },
   );
+  Future<void> edit(DbRow supplier) => entryForm(
+    context,
+    'Edit supplier',
+    [
+      Entry('Supplier name', initial: supplier['name'] as String),
+      Entry('Phone number', initial: supplier['phone'] as String),
+      Entry('VAT / tax number', initial: supplier['tax_number'] as String),
+      Entry('Address', initial: supplier['address'] as String),
+    ],
+    (v) async {
+      await widget.store.updateSupplier(
+        supplier['id'] as int,
+        v[0],
+        v[1],
+        v[2],
+        v[3],
+      );
+      await load();
+    },
+  );
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: const UiText('Suppliers')),
@@ -75,6 +95,7 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
                   padding: const EdgeInsets.only(bottom: 10),
                   child: Card(
                     child: ListTile(
+                      onTap: () => edit(s),
                       leading: CircleAvatar(
                         backgroundColor: const Color(0xFFE8F2ED),
                         child: UiText(
@@ -163,7 +184,7 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
   Future<void> details(DbRow purchase) async {
     final lines = await widget.store.purchaseLines(purchase['id'] as int);
     if (!mounted) return;
-    final pay = await showModalBottomSheet<bool>(
+    final pay = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
       isScrollControlled: true,
@@ -188,7 +209,7 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
                     contentPadding: EdgeInsets.zero,
                     title: Text(line['name'] as String),
                     subtitle: UiText(
-                      '${line['quantity']} × ${money(line['cost'] as int)}',
+                      '${line['quantity']} × ${money(line['cost'] as int)} • ${line['returned']} returned',
                     ),
                     trailing: UiText(
                       money((line['quantity'] as int) * (line['cost'] as int)),
@@ -198,16 +219,26 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
                 const Divider(),
                 totalRow('Total', purchase['total'] as int, bold: true),
                 totalRow('Paid', purchase['paid'] as int),
+                totalRow('Returns', purchase['returned'] as int),
                 totalRow(
-                  'Balance',
-                  (purchase['total'] as int) - (purchase['paid'] as int),
-                  bold: true,
+                  'Supplier refunds received',
+                  purchase['refunded'] as int,
                 ),
-                if (purchase['paid'] != purchase['total'])
+                totalRow('Balance', purchaseBalance(purchase), bold: true),
+                if (purchaseBalance(purchase) > 0)
                   FilledButton.icon(
-                    onPressed: () => Navigator.pop(ctx, true),
+                    onPressed: () => Navigator.pop(ctx, 'pay'),
                     icon: const Icon(Icons.payments_outlined),
                     label: const UiText('Record supplier payment'),
+                  ),
+                if (lines.any(
+                  (line) =>
+                      (line['quantity'] as int) > (line['returned'] as int),
+                ))
+                  OutlinedButton.icon(
+                    onPressed: () => Navigator.pop(ctx, 'return'),
+                    icon: const Icon(Icons.undo_rounded),
+                    label: const UiText('Return purchase items'),
                   ),
               ],
             ),
@@ -215,16 +246,52 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
         ),
       ),
     );
-    if (pay == true && mounted) {
+    if (pay == 'return' && mounted) {
+      final selected = await showModalBottomSheet<Map<int, int>>(
+        context: context,
+        isScrollControlled: true,
+        showDragHandle: true,
+        builder: (_) => ReturnSheet(lines: lines, purchase: purchase),
+      );
+      if (selected != null && mounted) {
+        try {
+          final refund = await widget.store.returnPurchase(
+            purchase['id'] as int,
+            selected,
+          );
+          await load();
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: UiText(
+                  'Purchase return saved. Supplier refund received: ${money(refund)}',
+                ),
+              ),
+            );
+          }
+        } catch (e) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: UiText(
+                  e is FormatException
+                      ? e.message
+                      : 'Could not save the return.',
+                ),
+              ),
+            );
+          }
+        }
+      }
+    }
+    if (pay == 'pay' && mounted) {
       await entryForm(
         context,
         'Pay supplier',
         [
           Entry(
             'Amount (SAR)',
-            initial:
-                (((purchase['total'] as int) - (purchase['paid'] as int)) / 100)
-                    .toStringAsFixed(2),
+            initial: (purchaseBalance(purchase) / 100).toStringAsFixed(2),
             numeric: true,
           ),
         ],
@@ -290,16 +357,16 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
                         crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
                           UiText(
-                            money(p['total'] as int),
+                            money((p['total'] as int) - (p['returned'] as int)),
                             style: const TextStyle(fontWeight: FontWeight.w700),
                           ),
                           UiText(
-                            p['paid'] == p['total']
+                            purchaseBalance(p) == 0
                                 ? 'Paid'
-                                : '${money((p['total'] as int) - (p['paid'] as int))} due',
+                                : '${money(purchaseBalance(p))} due',
                             style: TextStyle(
                               fontSize: 11,
-                              color: p['paid'] == p['total']
+                              color: purchaseBalance(p) == 0
                                   ? teal
                                   : const Color(0xFFA96E1D),
                             ),
@@ -804,13 +871,25 @@ Widget reportCard(
 
 class ReturnSheet extends StatefulWidget {
   final List<DbRow> lines;
-  const ReturnSheet({super.key, required this.lines});
+  final DbRow? purchase;
+  const ReturnSheet({super.key, required this.lines, this.purchase});
   @override
   State<ReturnSheet> createState() => _ReturnSheetState();
 }
 
 class _ReturnSheetState extends State<ReturnSheet> {
   final quantities = <int, int>{};
+  int get purchaseReturnTotal => widget.lines.fold(
+    0,
+    (sum, line) =>
+        sum + ((line['cost'] as int?) ?? 0) * (quantities[line['id']] ?? 0),
+  );
+  int get supplierRefund => widget.purchase == null
+      ? 0
+      : (purchaseReturnTotal - purchaseBalance(widget.purchase!)).clamp(
+          0,
+          purchaseReturnTotal,
+        );
   @override
   Widget build(BuildContext context) => SafeArea(
     child: SingleChildScrollView(
@@ -821,13 +900,17 @@ class _ReturnSheetState extends State<ReturnSheet> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             UiText(
-              'Return sale items',
+              widget.purchase == null
+                  ? 'Return sale items'
+                  : 'Return purchase items',
               style: Theme.of(context).textTheme.titleLarge,
             ),
             const SizedBox(height: 8),
-            const UiText(
-              'Returned quantities go back to the original stock location.',
-              style: TextStyle(color: Color(0xFF71818A)),
+            UiText(
+              widget.purchase == null
+                  ? 'Returned quantities go back to the original stock location.'
+                  : 'Purchase returns remove stock from the original location and reduce the supplier balance.',
+              style: const TextStyle(color: Color(0xFF71818A)),
             ),
             const SizedBox(height: 16),
             ...widget.lines
@@ -872,6 +955,14 @@ class _ReturnSheetState extends State<ReturnSheet> {
                   );
                 }),
             const SizedBox(height: 16),
+            if (widget.purchase != null) ...[
+              totalRow('Return value', purchaseReturnTotal),
+              totalRow('Supplier refund received', supplierRefund),
+              if (supplierRefund > 0)
+                const UiText(
+                  'Confirm only after receiving the supplier refund shown above.',
+                ),
+            ],
             FilledButton(
               onPressed: quantities.values.any((q) => q > 0)
                   ? () => Navigator.pop(context, {

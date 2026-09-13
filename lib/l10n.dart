@@ -413,4 +413,29 @@ const arabic = <String, String>{
       'تحتوي النسخة على سجلات غير صالحة. لم تتغير بياناتك الحالية.',
   'Backup balances do not match its records. Your existing data was not changed.':
       'أرصدة النسخة لا تتطابق مع سجلاتها. لم تتغير بياناتك الحالية.',
+  'Edit customer': 'تعديل العميل',
+  'Edit supplier': 'تعديل المورد',
+  'Items total': 'إجمالي الأصناف',
+  'Discount': 'الخصم',
+  'Discount (SAR)': 'الخصم (ر.س)',
+  'Discount is applied before tax.': 'يُطبق الخصم قبل الضريبة.',
+  'Discount exceeds the items total.': 'الخصم يتجاوز إجمالي الأصناف.',
+  'Discount must be between zero and the items total.':
+      'يجب أن يكون الخصم بين صفر وإجمالي الأصناف.',
+  'Supplier refunds received': 'مبالغ مستردة من المورد',
+  'Supplier refund received': 'مبلغ مسترد من المورد',
+  'Return purchase items': 'إرجاع أصناف الشراء',
+  'Return value': 'قيمة المرتجع',
+  'Purchase returns remove stock from the original location and reduce the supplier balance.':
+      'تُخصم مرتجعات الشراء من المخزون في الموقع الأصلي وتُخفض رصيد المورد.',
+  'Confirm only after receiving the supplier refund shown above.':
+      'أكد فقط بعد استلام المبلغ المسترد من المورد الموضح أعلاه.',
+  'Purchase return saved. Supplier refund received: {amount}':
+      'حُفظ مرتجع الشراء. المبلغ المسترد من المورد: {amount}',
+  'Purchase no longer exists.': 'عملية الشراء لم تعد موجودة.',
+  'Purchase item no longer exists.': 'صنف الشراء لم يعد موجوداً.',
+  'Not enough stock at the original purchase location.':
+      'المخزون غير كافٍ في موقع الشراء الأصلي.',
+  '{quantity} × {price} • {returned} returned':
+      '{quantity} × {price} • المرتجع: {returned}',
 };

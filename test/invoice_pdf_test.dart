@@ -63,7 +63,14 @@ void main() {
           cost: 40,
         );
         await store.addCustomer('متجر النور', '', 'Riyadh');
-        final id = await store.checkout({1: 3}, 'shop', 1, 1500, 150);
+        final id = await store.checkout(
+          {1: 3},
+          'shop',
+          1,
+          1500,
+          150,
+          discount: 45,
+        );
         await store.returnSale(id, {
           (await store.lines(id)).single['id'] as int: 1,
         });

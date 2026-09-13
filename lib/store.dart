@@ -3,6 +3,23 @@ import 'package:sqflite/sqflite.dart';
 
 typedef DbRow = Map<String, Object?>;
 
+int purchaseBalance(DbRow row) =>
+    (row['total'] as int) -
+    (row['returned'] as int) -
+    (row['paid'] as int) +
+    (row['refunded'] as int);
+
+// Allocate each line's saved discount cumulatively so split returns reconcile
+// exactly to the original invoice, including the last halalah.
+int returnedLineValue(DbRow line, int quantity) {
+  final before = line['returned'] as int;
+  final discount = (line['discount'] as int?) ?? 0;
+  final originalQuantity = line['quantity'] as int;
+  return (line['price'] as int) * quantity -
+      (discount * (before + quantity) ~/ originalQuantity -
+          discount * before ~/ originalQuantity);
+}
+
 int amount(String value) {
   final text = value.trim();
   if (!RegExp(r'^\d{1,8}(\.\d{1,2})?$').hasMatch(text)) {
@@ -34,7 +51,7 @@ class PosStore {
     final database = await f.openDatabase(
       path ?? p.join(await f.getDatabasesPath(), 'rihla.db'),
       options: OpenDatabaseOptions(
-        version: 2,
+        version: 3,
         onConfigure: (db) async {
           await db.execute('PRAGMA foreign_keys = ON');
         },
@@ -82,6 +99,7 @@ class PosStore {
           });
           await db.insert('settings', {'key': 'tax_bps', 'value': '0'});
           await _createOperations(db);
+          await _upgradeTrading(db);
         },
         onUpgrade: (db, oldVersion, newVersion) async {
           if (oldVersion < 2) {
@@ -102,10 +120,33 @@ class PosStore {
             );
             await _createOperations(db);
           }
+          if (oldVersion < 3) await _upgradeTrading(db);
         },
       ),
     );
     return PosStore(database);
+  }
+
+  static Future<void> _upgradeTrading(DatabaseExecutor db) async {
+    await db.execute(
+      'ALTER TABLE sales ADD COLUMN discount INTEGER NOT NULL DEFAULT 0 CHECK(discount >= 0)',
+    );
+    await db.execute(
+      'ALTER TABLE sale_lines ADD COLUMN discount INTEGER NOT NULL DEFAULT 0 CHECK(discount >= 0)',
+    );
+    await db.execute(
+      'ALTER TABLE purchases ADD COLUMN returned INTEGER NOT NULL DEFAULT 0 CHECK(returned >= 0)',
+    );
+    await db.execute(
+      'ALTER TABLE purchases ADD COLUMN refunded INTEGER NOT NULL DEFAULT 0 CHECK(refunded >= 0)',
+    );
+    await db.execute(
+      'ALTER TABLE purchase_lines ADD COLUMN returned INTEGER NOT NULL DEFAULT 0 CHECK(returned >= 0)',
+    );
+    await db.execute('''CREATE TABLE purchase_returns (
+      id INTEGER PRIMARY KEY, purchase_id INTEGER NOT NULL REFERENCES purchases(id),
+      created TEXT NOT NULL, total INTEGER NOT NULL CHECK(total >= 0),
+      refund INTEGER NOT NULL CHECK(refund >= 0 AND refund <= total))''');
   }
 
   static Future<void> _createOperations(DatabaseExecutor db) async {
@@ -147,10 +188,11 @@ class PosStore {
   Future<List<DbRow>> sales() => db.query('sales', orderBy: 'id DESC');
   Future<List<DbRow>> lines(int sale) =>
       db.query('sale_lines', where: 'sale_id=?', whereArgs: [sale]);
-  Future<List<DbRow>> suppliers() =>
-      db.rawQuery('''SELECT s.*, COALESCE(SUM(p.total-p.paid),0) AS balance
+  Future<List<DbRow>> suppliers() => db.rawQuery(
+    '''SELECT s.*, COALESCE(SUM(p.total-p.returned-p.paid+p.refunded),0) AS balance
     FROM suppliers s LEFT JOIN purchases p ON p.supplier_id=s.id
-    GROUP BY s.id ORDER BY s.name COLLATE NOCASE''');
+    GROUP BY s.id ORDER BY s.name COLLATE NOCASE''',
+  );
   Future<List<DbRow>> purchases() => db.query('purchases', orderBy: 'id DESC');
   Future<List<DbRow>> purchaseLines(int purchase) =>
       db.query('purchase_lines', where: 'purchase_id=?', whereArgs: [purchase]);
@@ -259,6 +301,24 @@ class PosStore {
     });
   }
 
+  Future<void> updateCustomer(
+    int id,
+    String name,
+    String phone,
+    String area,
+  ) async {
+    if (name.trim().isEmpty) {
+      throw const FormatException('Customer name is required.');
+    }
+    final changed = await db.update(
+      'customers',
+      {'name': name.trim(), 'phone': phone.trim(), 'area': area.trim()},
+      where: 'id=?',
+      whereArgs: [id],
+    );
+    if (changed != 1) throw const FormatException('Customer no longer exists.');
+  }
+
   static void _location(String location) {
     if (location != 'shop' && location != 'van') {
       throw ArgumentError('Invalid stock location');
@@ -322,8 +382,9 @@ class PosStore {
     String location,
     int? customer,
     int taxBps,
-    int? payment,
-  ) async {
+    int? payment, {
+    int discount = 0,
+  }) async {
     _location(location);
     if (cart.isEmpty) throw const FormatException('Add an item to the sale.');
     if (taxBps < 0 || taxBps > 10000) {
@@ -371,6 +432,19 @@ class PosStore {
           'cost': row['cost'],
         });
       }
+      if (discount < 0 || discount > subtotal) {
+        throw const FormatException(
+          'Discount must be between zero and the items total.',
+        );
+      }
+      int cumulative = 0, allocated = 0;
+      for (final item in items) {
+        cumulative += (item['price'] as int) * (item['quantity'] as int);
+        final target = subtotal == 0 ? 0 : discount * cumulative ~/ subtotal;
+        item['discount'] = target - allocated;
+        allocated = target;
+      }
+      subtotal -= discount;
       final tax = (subtotal * taxBps + 5000) ~/ 10000;
       final total = subtotal + tax;
       final paid = payment ?? total;
@@ -388,6 +462,7 @@ class PosStore {
         'customer_name': customerName,
         'location': location,
         'subtotal': subtotal,
+        'discount': discount,
         'tax': tax,
         'total': total,
         'paid': paid,
@@ -454,6 +529,30 @@ class PosStore {
       'tax_number': taxNumber.trim(),
       'address': address.trim(),
     });
+  }
+
+  Future<void> updateSupplier(
+    int id,
+    String name,
+    String phone,
+    String taxNumber,
+    String address,
+  ) async {
+    if (name.trim().isEmpty) {
+      throw const FormatException('Supplier name is required.');
+    }
+    final changed = await db.update(
+      'suppliers',
+      {
+        'name': name.trim(),
+        'phone': phone.trim(),
+        'tax_number': taxNumber.trim(),
+        'address': address.trim(),
+      },
+      where: 'id=?',
+      whereArgs: [id],
+    );
+    if (changed != 1) throw const FormatException('Supplier no longer exists.');
   }
 
   Future<int> addPurchase(
@@ -551,7 +650,7 @@ class PosStore {
     }
     await db.transaction((tx) async {
       final changed = await tx.rawUpdate(
-        'UPDATE purchases SET paid=paid+? WHERE id=? AND total-paid>=?',
+        'UPDATE purchases SET paid=paid+? WHERE id=? AND total-returned-paid+refunded>=?',
         [payment, purchase, payment],
       );
       if (changed != 1) {
@@ -615,7 +714,7 @@ class PosStore {
             'Only $available ${line['name']} can be returned.',
           );
         }
-        subtotal += (line['price'] as int) * entry.value;
+        subtotal += returnedLineValue(line, entry.value);
         returnedItems.add((line: line, quantity: entry.value));
       }
       final previous = await tx.rawQuery(
@@ -672,6 +771,85 @@ class PosStore {
     });
   }
 
+  Future<int> returnPurchase(int purchaseId, Map<int, int> quantities) async {
+    if (quantities.isEmpty) {
+      throw const FormatException('Choose at least one item to return.');
+    }
+    return db.transaction((tx) async {
+      final rows = await tx.query(
+        'purchases',
+        where: 'id=?',
+        whereArgs: [purchaseId],
+      );
+      if (rows.isEmpty) {
+        throw const FormatException('Purchase no longer exists.');
+      }
+      final purchase = rows.single;
+      final location = purchase['location'] as String;
+      _location(location);
+      int total = 0;
+      for (final entry in quantities.entries) {
+        if (entry.value <= 0) {
+          throw const FormatException('Return quantity must be positive.');
+        }
+        final lines = await tx.query(
+          'purchase_lines',
+          where: 'id=? AND purchase_id=?',
+          whereArgs: [entry.key, purchaseId],
+        );
+        if (lines.isEmpty) {
+          throw const FormatException('Purchase item no longer exists.');
+        }
+        final line = lines.single;
+        final available = (line['quantity'] as int) - (line['returned'] as int);
+        if (entry.value > available) {
+          throw FormatException(
+            'Only $available ${line['name']} can be returned.',
+          );
+        }
+        final changed = await tx.rawUpdate(
+          'UPDATE products SET $location=$location-? WHERE id=? AND $location>=?',
+          [entry.value, line['product_id'], entry.value],
+        );
+        if (changed != 1) {
+          throw const FormatException(
+            'Not enough stock at the original purchase location.',
+          );
+        }
+        await tx.rawUpdate(
+          'UPDATE purchase_lines SET returned=returned+? WHERE id=?',
+          [entry.value, entry.key],
+        );
+        await _movement(
+          tx,
+          line['product_id'] as int,
+          location,
+          -entry.value,
+          'Return for purchase #$purchaseId',
+        );
+        total += (line['cost'] as int) * entry.value;
+      }
+      final balance = purchaseBalance(purchase);
+      final refund = total > balance ? total - balance : 0;
+      await tx.update(
+        'purchases',
+        {
+          'returned': (purchase['returned'] as int) + total,
+          'refunded': (purchase['refunded'] as int) + refund,
+        },
+        where: 'id=?',
+        whereArgs: [purchaseId],
+      );
+      await tx.insert('purchase_returns', {
+        'purchase_id': purchaseId,
+        'created': DateTime.now().toUtc().toIso8601String(),
+        'total': total,
+        'refund': refund,
+      });
+      return refund;
+    });
+  }
+
   Future<Map<String, int>> report() async {
     Future<int> value(String sql) async =>
         (await db.rawQuery(sql)).first['value'] as int;
@@ -684,10 +862,10 @@ class PosStore {
         COALESCE((SELECT SUM(tax) FROM sale_returns),0) value''',
       ),
       'gross_profit': await value(
-        'SELECT COALESCE(SUM((price-cost)*(quantity-returned)),0) value FROM sale_lines',
+        'SELECT COALESCE(SUM((price-cost)*(quantity-returned)-discount+(discount*returned/quantity)),0) value FROM sale_lines',
       ),
       'purchases': await value(
-        'SELECT COALESCE(SUM(total),0) value FROM purchases',
+        'SELECT COALESCE(SUM(total-returned),0) value FROM purchases',
       ),
       'expenses': await value(
         'SELECT COALESCE(SUM(amount),0) value FROM expenses',
@@ -696,7 +874,7 @@ class PosStore {
         'SELECT COALESCE(SUM(total-returned-paid+refunded),0) value FROM sales',
       ),
       'payables': await value(
-        'SELECT COALESCE(SUM(total-paid),0) value FROM purchases',
+        'SELECT COALESCE(SUM(total-returned-paid+refunded),0) value FROM purchases',
       ),
       'stock_value': await value(
         'SELECT COALESCE(SUM(cost*(shop+van)),0) value FROM products',

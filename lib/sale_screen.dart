@@ -18,15 +18,34 @@ class _SaleScreenState extends State<SaleScreen> {
   List<DbRow> products = [], customers = [];
   final cart = <int, int>{};
   final paymentController = TextEditingController(text: '0.00');
+  final discountController = TextEditingController(text: '0.00');
   String query = '', paymentMode = 'paid';
   int? customer;
   bool loading = true, saving = false;
   String? error;
   int get taxBps => int.parse(widget.settings['tax_bps'] ?? '0');
-  int get subtotal => products.fold(
+  int get itemsTotal => products.fold(
     0,
     (total, p) => total + (p['price'] as int) * (cart[p['id']] ?? 0),
   );
+  int get discount {
+    try {
+      return amount(discountController.text);
+    } on FormatException {
+      return 0;
+    }
+  }
+
+  int get subtotal => (itemsTotal - discount).clamp(0, itemsTotal);
+  String? get discountError {
+    try {
+      final value = amount(discountController.text);
+      return value > itemsTotal ? 'Discount exceeds the items total.' : null;
+    } on FormatException catch (e) {
+      return e.message;
+    }
+  }
+
   int get tax => (subtotal * taxBps + 5000) ~/ 10000;
   @override
   void initState() {
@@ -37,6 +56,7 @@ class _SaleScreenState extends State<SaleScreen> {
   @override
   void dispose() {
     paymentController.dispose();
+    discountController.dispose();
     super.dispose();
   }
 
@@ -98,6 +118,7 @@ class _SaleScreenState extends State<SaleScreen> {
             : paymentMode == 'credit'
             ? 0
             : amount(paymentController.text),
+        discount: amount(discountController.text),
       );
       if (!mounted) return;
       Navigator.pop(context);
@@ -348,6 +369,26 @@ class _SaleScreenState extends State<SaleScreen> {
                                           ),
                                         ),
                                       ),
+                                  totalRow('Items total', itemsTotal),
+                                  TextField(
+                                    controller: discountController,
+                                    enabled: !saving,
+                                    keyboardType:
+                                        const TextInputType.numberWithOptions(
+                                          decimal: true,
+                                        ),
+                                    decoration: InputDecoration(
+                                      labelText: tr(context, 'Discount (SAR)'),
+                                      helperText: tr(
+                                        context,
+                                        'Discount is applied before tax.',
+                                      ),
+                                      errorText: discountError == null
+                                          ? null
+                                          : tr(context, discountError!),
+                                    ),
+                                    onChanged: (_) => setState(() {}),
+                                  ),
                                   totalRow('Subtotal', subtotal),
                                   totalRow('Tax (${taxBps / 100}%)', tax),
                                   const Divider(),
@@ -411,7 +452,10 @@ class _SaleScreenState extends State<SaleScreen> {
                             ),
                           const SizedBox(height: 22),
                           FilledButton.icon(
-                            onPressed: saving || cart.isEmpty ? null : save,
+                            onPressed:
+                                saving || cart.isEmpty || discountError != null
+                                ? null
+                                : save,
                             icon: Icon(
                               saving
                                   ? Icons.hourglass_top

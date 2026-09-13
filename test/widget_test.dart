@@ -49,6 +49,8 @@ void main() {
     await tester.tap(find.byTooltip('Add one Water bottle'));
     await tester.pumpAndSettle();
     final complete = find.text('Complete sale • SAR 2.00');
+    await tester.drag(find.byType(ListView).last, const Offset(0, -400));
+    await tester.pumpAndSettle();
     await tester.ensureVisible(complete);
     await tester.runAsync(() async {
       await tester.tap(complete);
