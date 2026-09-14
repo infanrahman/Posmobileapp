@@ -115,17 +115,39 @@ void main() {
   test('schema 4 backup restores with an empty cashbook', () async {
     final legacy = editBackup(await source.exportBackup(), (json) {
       json['database_version'] = 4;
-      json['payload']['tables'].remove('cash_sessions');
-      for (final row in json['payload']['tables']['products']) {
+      final tables = json['payload']['tables'] as Map;
+      for (final name in [
+        'cash_sessions',
+        'vans',
+        'sale_cancellations',
+        'saved_documents',
+      ]) {
+        tables.remove(name);
+      }
+      for (final row in tables['sales']) {
+        for (final field in [
+          'cancelled',
+          'cancelled_at',
+          'cancellation_reason',
+          'invoice_uuid',
+          'invoice_counter',
+          'van_id',
+          'van_name',
+          'salesperson',
+        ]) {
+          row.remove(field);
+        }
+      }
+      for (final row in tables['products']) {
         row.remove('reorder_level');
       }
       for (final name in ['payments', 'supplier_payments', 'expenses']) {
-        for (final row in json['payload']['tables'][name]) {
+        for (final row in tables[name]) {
           row.remove('method');
         }
       }
       for (final name in ['sale_returns', 'purchase_returns']) {
-        for (final row in json['payload']['tables'][name]) {
+        for (final row in tables[name]) {
           row.remove('refund_method');
         }
       }

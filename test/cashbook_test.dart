@@ -82,7 +82,7 @@ void main() {
       factory: databaseFactoryFfi,
       path: '${directory.path}/cashbook.db',
     );
-    expect(await store.db.getVersion(), 7);
+    expect(await store.db.getVersion(), 8);
     expect((await store.products()).single['name'], 'Existing item');
     expect(await store.openCashSession('shop'), isNull);
     expect(await store.startCashSession('shop', 0), 1);

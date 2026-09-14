@@ -97,4 +97,30 @@ void main() {
       }
     },
   );
+
+  test('thermal receipt supports long carts and a Phase 1 QR', () async {
+    final bytes = await createThermalReceiptPdf(
+      sale: {
+        'id': 9,
+        'created': '2026-09-14T10:00:00Z',
+        'subtotal': 10000,
+        'tax': 1500,
+        'total': 11500,
+      },
+      lines: List.generate(
+        35,
+        (index) => {
+          'name': 'Product ${index + 1}',
+          'quantity': 1,
+          'price': 300,
+          'discount': 0,
+        },
+      ),
+      business: 'Riyadh Trading',
+      language: 'en',
+      sellerVat: '310123456789013',
+    );
+    expect(String.fromCharCodes(bytes.take(5)), '%PDF-');
+    expect(bytes.length, greaterThan(1000));
+  });
 }

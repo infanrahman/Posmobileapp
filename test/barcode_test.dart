@@ -99,18 +99,40 @@ void main() {
       final report = await store.report();
       final legacy = editBackup(await store.exportBackup(), (j) {
         j['database_version'] = 3;
-        j['payload']['tables'].remove('cash_sessions');
+        final tables = j['payload']['tables'] as Map;
+        for (final name in [
+          'cash_sessions',
+          'vans',
+          'sale_cancellations',
+          'saved_documents',
+        ]) {
+          tables.remove(name);
+        }
+        for (final row in tables['sales']) {
+          for (final field in [
+            'cancelled',
+            'cancelled_at',
+            'cancellation_reason',
+            'invoice_uuid',
+            'invoice_counter',
+            'van_id',
+            'van_name',
+            'salesperson',
+          ]) {
+            row.remove(field);
+          }
+        }
         for (final name in ['payments', 'supplier_payments', 'expenses']) {
-          for (final row in j['payload']['tables'][name]) {
+          for (final row in tables[name]) {
             row.remove('method');
           }
         }
         for (final name in ['sale_returns', 'purchase_returns']) {
-          for (final row in j['payload']['tables'][name]) {
+          for (final row in tables[name]) {
             row.remove('refund_method');
           }
         }
-        for (final row in j['payload']['tables']['products']) {
+        for (final row in tables['products']) {
           row.remove('barcode');
           row.remove('reorder_level');
         }
@@ -124,7 +146,7 @@ void main() {
         factory: databaseFactoryFfi,
         path: '${directory.path}/db',
       );
-      expect(await store.db.getVersion(), 7);
+      expect(await store.db.getVersion(), 8);
       expect(await store.report(), report);
       await store.updateProduct(1, 'Changed', 'W01', 100, 0, barcode: '123');
       await store.restoreBackup(PosBackup.decode(legacy));

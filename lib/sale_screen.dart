@@ -4,46 +4,68 @@ class SaleScreen extends StatefulWidget {
   final PosStore store;
   final String location;
   final Map<String, String> settings;
+  final DbRow? document;
   const SaleScreen({
     super.key,
     required this.store,
     required this.location,
     required this.settings,
+    this.document,
   });
   @override
   State<SaleScreen> createState() => _SaleScreenState();
 }
 
 class _SaleScreenState extends State<SaleScreen> {
-  List<DbRow> products = [], customers = [];
+  List<DbRow> products = [], customers = [], vans = [];
   final cart = <int, int>{};
+  final lineDiscounts = <int, int>{};
+  final savedPrices = <int, int>{};
   final paymentController = TextEditingController(text: '0.00');
   final splitCashController = TextEditingController(text: '0.00');
   final splitCardController = TextEditingController(text: '0.00');
   final discountController = TextEditingController(text: '0.00');
   String query = '', paymentMode = 'paid', selectedPaymentMethod = 'cash';
+  String discountMode = 'fixed';
   int? customer;
+  int? vanId;
   bool loading = true, saving = false;
   bool scanning = false;
   String? error;
   int get taxBps => int.parse(widget.settings['tax_bps'] ?? '0');
   int get itemsTotal => products.fold(
     0,
-    (total, p) => total + (p['price'] as int) * (cart[p['id']] ?? 0),
+    (total, p) =>
+        total +
+        (savedPrices[p['id']] ?? p['price'] as int) * (cart[p['id']] ?? 0),
   );
+  int get itemDiscountTotal => lineDiscounts.values.fold(0, (a, b) => a + b);
+  int get discountedItemsTotal =>
+      (itemsTotal - itemDiscountTotal).clamp(0, itemsTotal);
   int get discount {
     try {
+      if (discountMode == 'percent') {
+        final basisPoints = amount(discountController.text);
+        if (basisPoints > 10000) return 0;
+        return (discountedItemsTotal * basisPoints + 5000) ~/ 10000;
+      }
       return amount(discountController.text);
     } on FormatException {
       return 0;
     }
   }
 
-  int get subtotal => (itemsTotal - discount).clamp(0, itemsTotal);
+  int get subtotal => (discountedItemsTotal - discount).clamp(0, itemsTotal);
   String? get discountError {
     try {
+      if (discountMode == 'percent') {
+        final basisPoints = amount(discountController.text);
+        return basisPoints > 10000 ? 'Enter a percentage from 0 to 100.' : null;
+      }
       final value = amount(discountController.text);
-      return value > itemsTotal ? 'Discount exceeds the items total.' : null;
+      return value > discountedItemsTotal
+          ? 'Discount exceeds the items total.'
+          : null;
     } on FormatException catch (e) {
       return e.message;
     }
@@ -69,10 +91,60 @@ class _SaleScreenState extends State<SaleScreen> {
     try {
       final p = await widget.store.products();
       final c = await widget.store.customers();
+      final availableVans = widget.location == 'van'
+          ? await widget.store.vans(activeOnly: true)
+          : <DbRow>[];
+      if (availableVans.isNotEmpty) vanId = availableVans.first['id'] as int;
+      if (widget.document != null) {
+        final payload = widget.store.documentPayload(widget.document!);
+        final savedCart = payload['cart'];
+        if (savedCart is Map) {
+          for (final entry in savedCart.entries) {
+            final id = int.tryParse('${entry.key}');
+            final quantity = entry.value is num
+                ? (entry.value as num).toInt()
+                : 0;
+            if (id != null && quantity > 0 && p.any((row) => row['id'] == id)) {
+              cart[id] = quantity;
+            }
+          }
+        }
+        final savedDiscounts = payload['line_discounts'];
+        if (savedDiscounts is Map) {
+          for (final entry in savedDiscounts.entries) {
+            final id = int.tryParse('${entry.key}');
+            final value = entry.value is num ? (entry.value as num).toInt() : 0;
+            if (id != null && value > 0) lineDiscounts[id] = value;
+          }
+        }
+        final prices = payload['unit_prices'];
+        if (prices is Map) {
+          for (final entry in prices.entries) {
+            final id = int.tryParse('${entry.key}');
+            final value = entry.value is num
+                ? (entry.value as num).toInt()
+                : -1;
+            if (id != null && value >= 0) savedPrices[id] = value;
+          }
+        }
+        customer = (payload['customer_id'] as num?)?.toInt();
+        final savedVanId = (payload['van_id'] as num?)?.toInt();
+        if (availableVans.any((row) => row['id'] == savedVanId)) {
+          vanId = savedVanId;
+        }
+        paymentMode = '${payload['payment_mode'] ?? 'paid'}';
+        selectedPaymentMethod = '${payload['payment_method'] ?? 'cash'}';
+        discountMode = '${payload['discount_mode'] ?? 'fixed'}';
+        discountController.text = '${payload['discount_value'] ?? '0.00'}';
+        paymentController.text = '${payload['payment_value'] ?? '0.00'}';
+        splitCashController.text = '${payload['split_cash'] ?? '0.00'}';
+        splitCardController.text = '${payload['split_card'] ?? '0.00'}';
+      }
       if (mounted) {
         setState(() {
           products = p;
           customers = c;
+          vans = availableVans;
           loading = false;
         });
       }
@@ -100,6 +172,7 @@ class _SaleScreenState extends State<SaleScreen> {
     setState(() {
       if (next <= 0) {
         cart.remove(id);
+        lineDiscounts.remove(id);
       } else {
         cart[id] = next;
       }
@@ -137,9 +210,19 @@ class _SaleScreenState extends State<SaleScreen> {
         customer,
         taxBps,
         paid,
-        discount: amount(discountController.text),
+        discount: discount,
         paymentBreakdown: breakdown,
+        lineDiscounts: Map.of(lineDiscounts),
+        unitPrices: Map.of(savedPrices),
+        vanId: vanId,
       );
+      if (widget.document != null) {
+        if (widget.document!['kind'] == 'held_sale') {
+          await widget.store.deleteDocument(widget.document!['id'] as int);
+        } else {
+          await widget.store.finishDocument(widget.document!['id'] as int, id);
+        }
+      }
       if (!mounted) return;
       Navigator.pop(context);
       ScaffoldMessenger.of(context).showSnackBar(
@@ -159,6 +242,103 @@ class _SaleScreenState extends State<SaleScreen> {
         });
       }
     }
+  }
+
+  Future<void> editItemDiscount(DbRow product) async {
+    final id = product['id'] as int;
+    final lineTotal =
+        (savedPrices[id] ?? product['price'] as int) * (cart[id] ?? 0);
+    await entryForm(
+      context,
+      'Item discount',
+      [
+        Entry(
+          'Discount (SAR)',
+          initial: ((lineDiscounts[id] ?? 0) / 100).toStringAsFixed(2),
+          numeric: true,
+        ),
+      ],
+      (values) async {
+        final value = amount(values[0]);
+        if (value < 0 || value > lineTotal) {
+          throw const FormatException(
+            'Item discount must be between zero and the line total.',
+          );
+        }
+        setState(() {
+          if (value == 0) {
+            lineDiscounts.remove(id);
+          } else {
+            lineDiscounts[id] = value;
+          }
+        });
+      },
+    );
+  }
+
+  Future<void> saveForLater(String kind) async {
+    if (cart.isEmpty) return;
+    var saved = false;
+    await entryForm(
+      context,
+      kind == 'quotation' ? 'Save quotation' : 'Hold sale',
+      [
+        Entry(
+          'Document name',
+          initial: kind == 'quotation'
+              ? 'Quotation ${DateFormat('yyyy-MM-dd HH:mm').format(DateTime.now())}'
+              : 'Held sale ${DateFormat('yyyy-MM-dd HH:mm').format(DateTime.now())}',
+        ),
+        const Entry('Notes'),
+      ],
+      (values) async {
+        final party = customer == null
+            ? 'Walk-in customer'
+            : customers.firstWhere((row) => row['id'] == customer)['name']
+                  as String;
+        if (widget.document != null && widget.document!['status'] == 'open') {
+          await widget.store.deleteDocument(widget.document!['id'] as int);
+        }
+        await widget.store.saveDocument(
+          kind: kind,
+          name: values[0],
+          partyId: customer,
+          partyName: party,
+          location: widget.location,
+          total: subtotal + tax,
+          notes: values[1],
+          payload: {
+            'cart': {
+              for (final entry in cart.entries) '${entry.key}': entry.value,
+            },
+            'line_discounts': {
+              for (final entry in lineDiscounts.entries)
+                '${entry.key}': entry.value,
+            },
+            'unit_prices': {
+              for (final entry in cart.entries)
+                '${entry.key}':
+                    savedPrices[entry.key] ??
+                    products.firstWhere(
+                          (row) => row['id'] == entry.key,
+                        )['price']
+                        as int,
+            },
+            'customer_id': customer,
+            'van_id': vanId,
+            'payment_mode': paymentMode,
+            'payment_method': selectedPaymentMethod,
+            'payment_value': paymentController.text,
+            'split_cash': splitCashController.text,
+            'split_card': splitCardController.text,
+            'discount_mode': discountMode,
+            'discount_value': discountController.text,
+          },
+        );
+        saved = true;
+      },
+    );
+    if (saved && mounted) Navigator.pop(context);
   }
 
   Future<void> scanItem() async {
@@ -237,8 +417,25 @@ class _SaleScreenState extends State<SaleScreen> {
             onPressed: saving ? null : close,
             icon: const Icon(Icons.close),
           ),
-          title: const UiText('New sale'),
+          title: UiText(
+            widget.document?['kind'] == 'quotation'
+                ? 'Convert quotation'
+                : widget.document?['kind'] == 'held_sale'
+                ? 'Resume held sale'
+                : 'New sale',
+          ),
           actions: [
+            PopupMenuButton<String>(
+              enabled: !saving && cart.isNotEmpty,
+              onSelected: saveForLater,
+              itemBuilder: (_) => const [
+                PopupMenuItem(value: 'held_sale', child: UiText('Hold sale')),
+                PopupMenuItem(
+                  value: 'quotation',
+                  child: UiText('Save quotation'),
+                ),
+              ],
+            ),
             Padding(
               padding: const EdgeInsets.only(right: 20),
               child: Chip(
@@ -284,6 +481,32 @@ class _SaleScreenState extends State<SaleScreen> {
                             ],
                             onChanged: (v) => setState(() => customer = v),
                           ),
+                          if (widget.location == 'van') ...[
+                            const SizedBox(height: 12),
+                            DropdownButtonFormField<int>(
+                              initialValue: vanId,
+                              isExpanded: true,
+                              decoration: InputDecoration(
+                                labelText: tr(context, 'Van / salesperson'),
+                                prefixIcon: const Icon(
+                                  Icons.local_shipping_outlined,
+                                ),
+                              ),
+                              items: [
+                                for (final van in vans)
+                                  DropdownMenuItem(
+                                    value: van['id'] as int,
+                                    child: Text(
+                                      [van['name'], van['salesperson']]
+                                          .where((value) => '$value'.isNotEmpty)
+                                          .join(' • '),
+                                    ),
+                                  ),
+                              ],
+                              onChanged: (value) =>
+                                  setState(() => vanId = value),
+                            ),
+                          ],
                           const SizedBox(height: 22),
                           UiText(
                             'Add items',
@@ -337,7 +560,7 @@ class _SaleScreenState extends State<SaleScreen> {
                                             ),
                                             const SizedBox(height: 4),
                                             UiText(
-                                              '${money(p['price'] as int)} • ${p[widget.location]} available',
+                                              '${money(savedPrices[p['id']] ?? p['price'] as int)} • ${p[widget.location]} available',
                                               style: const TextStyle(
                                                 fontSize: 12,
                                                 color: Color(0xFF71818A),
@@ -412,8 +635,23 @@ class _SaleScreenState extends State<SaleScreen> {
                                               ),
                                               UiText(
                                                 money(
-                                                  (p['price'] as int) *
-                                                      cart[p['id']]!,
+                                                  (savedPrices[p['id']] ??
+                                                              p['price']
+                                                                  as int) *
+                                                          cart[p['id']]! -
+                                                      (lineDiscounts[p['id']] ??
+                                                          0),
+                                                ),
+                                              ),
+                                              IconButton(
+                                                tooltip: tr(
+                                                  context,
+                                                  'Item discount',
+                                                ),
+                                                onPressed: () =>
+                                                    editItemDiscount(p),
+                                                icon: const Icon(
+                                                  Icons.discount_outlined,
                                                 ),
                                               ),
                                             ],
@@ -421,6 +659,29 @@ class _SaleScreenState extends State<SaleScreen> {
                                         ),
                                       ),
                                   totalRow('Items total', itemsTotal),
+                                  if (itemDiscountTotal > 0)
+                                    totalRow(
+                                      'Item discounts',
+                                      -itemDiscountTotal,
+                                    ),
+                                  SegmentedButton<String>(
+                                    segments: const [
+                                      ButtonSegment(
+                                        value: 'fixed',
+                                        label: UiText('Fixed SAR'),
+                                      ),
+                                      ButtonSegment(
+                                        value: 'percent',
+                                        label: UiText('Percentage'),
+                                      ),
+                                    ],
+                                    selected: {discountMode},
+                                    onSelectionChanged: (value) => setState(() {
+                                      discountMode = value.first;
+                                      discountController.text = '0.00';
+                                    }),
+                                  ),
+                                  const SizedBox(height: 10),
                                   TextField(
                                     controller: discountController,
                                     enabled: !saving,
@@ -429,7 +690,12 @@ class _SaleScreenState extends State<SaleScreen> {
                                           decimal: true,
                                         ),
                                     decoration: InputDecoration(
-                                      labelText: tr(context, 'Discount (SAR)'),
+                                      labelText: tr(
+                                        context,
+                                        discountMode == 'percent'
+                                            ? 'Discount (%)'
+                                            : 'Discount (SAR)',
+                                      ),
                                       helperText: tr(
                                         context,
                                         'Discount is applied before tax.',
@@ -566,6 +832,8 @@ class _SaleScreenState extends State<SaleScreen> {
                             label: UiText(
                               saving
                                   ? 'Saving locally…'
+                                  : widget.document?['kind'] == 'quotation'
+                                  ? 'Convert to sale • ${money(subtotal + tax)}'
                                   : 'Complete sale • ${money(subtotal + tax)}',
                             ),
                           ),

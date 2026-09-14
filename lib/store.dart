@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:math';
+
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
 import 'barcode.dart';
@@ -18,6 +21,13 @@ int purchaseBalance(DbRow row) =>
     (row['returned'] as int) -
     (row['paid'] as int) +
     (row['refunded'] as int);
+
+int saleBalance(DbRow row) => (row['cancelled'] as int? ?? 0) == 1
+    ? 0
+    : (row['total'] as int) -
+          (row['returned'] as int) -
+          (row['paid'] as int) +
+          (row['refunded'] as int);
 
 // Allocate each line's saved discount cumulatively so split returns reconcile
 // exactly to the original invoice, including the last halalah.
@@ -52,6 +62,18 @@ int positiveQuantity(String value) {
   return n;
 }
 
+String _invoiceUuid() {
+  final random = Random.secure();
+  final bytes = List<int>.generate(16, (_) => random.nextInt(256));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  String hex(int value) => value.toRadixString(16).padLeft(2, '0');
+  final value = bytes.map(hex).join();
+  return '${value.substring(0, 8)}-${value.substring(8, 12)}-'
+      '${value.substring(12, 16)}-${value.substring(16, 20)}-'
+      '${value.substring(20)}';
+}
+
 class PosStore {
   final Database db;
   PosStore(this.db);
@@ -61,7 +83,7 @@ class PosStore {
     final database = await f.openDatabase(
       path ?? p.join(await f.getDatabasesPath(), 'rihla.db'),
       options: OpenDatabaseOptions(
-        version: 7,
+        version: 8,
         onConfigure: (db) async {
           await db.execute('PRAGMA foreign_keys = ON');
         },
@@ -114,6 +136,7 @@ class PosStore {
           await _createCashbook(db);
           await _upgradePaymentMethods(db);
           await _upgradeReorderLevels(db);
+          await _upgradeAdvancedWorkflows(db);
         },
         onUpgrade: (db, oldVersion, newVersion) async {
           if (oldVersion < 2) {
@@ -139,6 +162,7 @@ class PosStore {
           if (oldVersion < 5) await _createCashbook(db);
           if (oldVersion < 6) await _upgradePaymentMethods(db);
           if (oldVersion < 7) await _upgradeReorderLevels(db);
+          if (oldVersion < 8) await _upgradeAdvancedWorkflows(db);
         },
       ),
     );
@@ -222,6 +246,67 @@ class PosStore {
     }
   }
 
+  static Future<void> _upgradeAdvancedWorkflows(DatabaseExecutor db) async {
+    Future<void> addColumn(String table, String definition) async {
+      final name = definition.split(' ').first;
+      final columns = await db.rawQuery('PRAGMA table_info($table)');
+      if (columns.isNotEmpty && !columns.any((row) => row['name'] == name)) {
+        await db.execute('ALTER TABLE $table ADD COLUMN $definition');
+      }
+    }
+
+    await addColumn(
+      'sales',
+      'cancelled INTEGER NOT NULL DEFAULT 0 CHECK(cancelled IN (0,1))',
+    );
+    await addColumn('sales', "cancelled_at TEXT NOT NULL DEFAULT ''");
+    await addColumn('sales', "cancellation_reason TEXT NOT NULL DEFAULT ''");
+    await addColumn('sales', "invoice_uuid TEXT NOT NULL DEFAULT ''");
+    await addColumn('sales', 'invoice_counter INTEGER NOT NULL DEFAULT 0');
+    await addColumn('sales', 'van_id INTEGER');
+    await addColumn('sales', "van_name TEXT NOT NULL DEFAULT ''");
+    await addColumn('sales', "salesperson TEXT NOT NULL DEFAULT ''");
+    await db.execute('''CREATE TABLE IF NOT EXISTS sale_cancellations (
+      id INTEGER PRIMARY KEY, sale_id INTEGER NOT NULL UNIQUE REFERENCES sales(id),
+      created TEXT NOT NULL, reason TEXT NOT NULL,
+      refund INTEGER NOT NULL CHECK(refund >= 0),
+      refund_method TEXT NOT NULL DEFAULT 'cash')''');
+    await db.execute('''CREATE TABLE IF NOT EXISTS saved_documents (
+      id INTEGER PRIMARY KEY, kind TEXT NOT NULL, created TEXT NOT NULL,
+      name TEXT NOT NULL, party_id INTEGER, party_name TEXT NOT NULL,
+      location TEXT NOT NULL, payload TEXT NOT NULL, total INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'open', linked_id INTEGER,
+      notes TEXT NOT NULL DEFAULT '')''');
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS saved_document_kind ON saved_documents(kind, status, id DESC)',
+    );
+    await db.execute('''CREATE TABLE IF NOT EXISTS vans (
+      id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE,
+      salesperson TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1
+      CHECK(active IN (0,1)))''');
+    await db.insert('vans', {
+      'id': 1,
+      'name': 'Van 1',
+      'salesperson': '',
+      'active': 1,
+    }, conflictAlgorithm: ConflictAlgorithm.ignore);
+    final settingsTable = await db.rawQuery(
+      "SELECT 1 FROM sqlite_master WHERE type='table' AND name='settings'",
+    );
+    if (settingsTable.isNotEmpty) {
+      for (final setting in const {
+        'seller_vat': '',
+        'business_address': '',
+        'invoice_counter': '0',
+      }.entries) {
+        await db.insert('settings', {
+          'key': setting.key,
+          'value': setting.value,
+        }, conflictAlgorithm: ConflictAlgorithm.ignore);
+      }
+    }
+  }
+
   static Future<void> _createOperations(DatabaseExecutor db) async {
     await db.execute('''CREATE TABLE IF NOT EXISTS suppliers (
       id INTEGER PRIMARY KEY, name TEXT NOT NULL, phone TEXT NOT NULL,
@@ -255,7 +340,8 @@ class PosStore {
       db.query('products', orderBy: 'name COLLATE NOCASE');
   Future<List<DbRow>> customers() => db.rawQuery(
     '''SELECT c.*,
-    COALESCE(SUM(s.total-s.returned-s.paid+s.refunded),0) AS balance FROM customers c
+    COALESCE(SUM(CASE WHEN COALESCE(s.cancelled,0)=0
+      THEN s.total-s.returned-s.paid+s.refunded ELSE 0 END),0) AS balance FROM customers c
     LEFT JOIN sales s ON s.customer_id=c.id GROUP BY c.id ORDER BY c.name COLLATE NOCASE''',
   );
   Future<List<DbRow>> sales() => db.query('sales', orderBy: 'id DESC');
@@ -271,21 +357,92 @@ class PosStore {
       db.query('purchase_lines', where: 'purchase_id=?', whereArgs: [purchase]);
   Future<List<DbRow>> salePayments(int sale) =>
       db.query('payments', where: 'sale_id=?', whereArgs: [sale]);
+  Future<List<DbRow>> saleCancellations(int sale) =>
+      db.query('sale_cancellations', where: 'sale_id=?', whereArgs: [sale]);
   Future<List<DbRow>> purchasePayments(int purchase) => db.query(
     'supplier_payments',
     where: 'purchase_id=?',
     whereArgs: [purchase],
   );
   Future<List<DbRow>> expenses() => db.query('expenses', orderBy: 'id DESC');
+  Future<List<DbRow>> vans({bool activeOnly = false}) => db.query(
+    'vans',
+    where: activeOnly ? 'active=1' : null,
+    orderBy: 'active DESC, name COLLATE NOCASE',
+  );
+  Future<List<DbRow>> savedDocuments(String kind) {
+    if (!{'held_sale', 'quotation', 'purchase_order'}.contains(kind)) {
+      throw ArgumentError('Invalid document kind');
+    }
+    return db.query(
+      'saved_documents',
+      where: 'kind=?',
+      whereArgs: [kind],
+      orderBy: 'id DESC',
+    );
+  }
+
+  Future<List<DbRow>> customerStatement(int customer) => db.rawQuery(
+    '''SELECT created, type, reference, debit, credit FROM (
+      SELECT s.created created, 'Sale' type, 'INV-' || printf('%05d',s.id) reference,
+        s.total debit, 0 credit
+        FROM sales s WHERE s.customer_id=?
+      UNION ALL
+      SELECT r.created, 'Sales return', 'INV-' || printf('%05d',r.sale_id), 0, r.total
+        FROM sale_returns r JOIN sales s ON s.id=r.sale_id
+        WHERE s.customer_id=? AND COALESCE(s.cancelled,0)=0
+      UNION ALL
+      SELECT p.created, 'Customer payment', 'INV-' || printf('%05d',p.sale_id), 0, p.amount
+        FROM payments p JOIN sales s ON s.id=p.sale_id
+        WHERE s.customer_id=?
+      UNION ALL
+      SELECT r.created, 'Customer refund', 'INV-' || printf('%05d',r.sale_id), r.refund, 0
+        FROM sale_returns r JOIN sales s ON s.id=r.sale_id
+        WHERE s.customer_id=? AND COALESCE(s.cancelled,0)=0
+      UNION ALL
+      SELECT c.created, 'Sale cancellation', 'INV-' || printf('%05d',c.sale_id),
+        c.refund, s.total FROM sale_cancellations c
+        JOIN sales s ON s.id=c.sale_id WHERE s.customer_id=?
+    ) ORDER BY created, reference''',
+    [customer, customer, customer, customer, customer],
+  );
+
+  Future<List<DbRow>> supplierStatement(int supplier) => db.rawQuery(
+    '''SELECT created, type, reference, debit, credit FROM (
+      SELECT created, 'Purchase' type, 'PUR-' || printf('%05d',id) reference,
+        total debit, 0 credit FROM purchases WHERE supplier_id=?
+      UNION ALL
+      SELECT r.created, 'Purchase return', 'PUR-' || printf('%05d',r.purchase_id), 0, r.total
+        FROM purchase_returns r JOIN purchases p ON p.id=r.purchase_id WHERE p.supplier_id=?
+      UNION ALL
+      SELECT sp.created, 'Supplier payment', 'PUR-' || printf('%05d',sp.purchase_id), 0, sp.amount
+        FROM supplier_payments sp JOIN purchases p ON p.id=sp.purchase_id WHERE p.supplier_id=?
+      UNION ALL
+      SELECT r.created, 'Supplier refund', 'PUR-' || printf('%05d',r.purchase_id), r.refund, 0
+        FROM purchase_returns r JOIN purchases p ON p.id=r.purchase_id WHERE p.supplier_id=?
+    ) ORDER BY created, reference''',
+    [supplier, supplier, supplier, supplier],
+  );
   Future<Map<String, String>> settings() async => {
     for (final row in await db.query('settings'))
       row['key'] as String: row['value'] as String,
   };
 
-  Future<void> saveSettings(String business, int taxBps) async {
-    if (business.trim().isEmpty || taxBps < 0 || taxBps > 10000) {
+  Future<void> saveSettings(
+    String business,
+    int taxBps, {
+    String? sellerVat,
+    String? businessAddress,
+  }) async {
+    final vat = sellerVat?.trim();
+    if (business.trim().isEmpty ||
+        taxBps < 0 ||
+        taxBps > 10000 ||
+        (vat != null &&
+            vat.isNotEmpty &&
+            !RegExp(r'^3\d{13}3$').hasMatch(vat))) {
       throw const FormatException(
-        'Enter a business name and a tax rate from 0 to 100.',
+        'Enter a business name, a tax rate from 0 to 100 and a valid 15-digit VAT number.',
       );
     }
     await db.transaction((tx) async {
@@ -301,8 +458,125 @@ class PosStore {
         where: 'key=?',
         whereArgs: ['tax_bps'],
       );
+      if (sellerVat != null) {
+        await tx.insert('settings', {
+          'key': 'seller_vat',
+          'value': vat!,
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
+      }
+      if (businessAddress != null) {
+        await tx.insert('settings', {
+          'key': 'business_address',
+          'value': businessAddress.trim(),
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
+      }
     });
   }
+
+  Future<int> addVan(String name, String salesperson) async {
+    if (name.trim().isEmpty) {
+      throw const FormatException('Van name is required.');
+    }
+    if ((await db.query(
+      'vans',
+      where: 'name=? COLLATE NOCASE',
+      whereArgs: [name.trim()],
+      limit: 1,
+    )).isNotEmpty) {
+      throw const FormatException('A van with this name already exists.');
+    }
+    return db.insert('vans', {
+      'name': name.trim(),
+      'salesperson': salesperson.trim(),
+      'active': 1,
+    });
+  }
+
+  Future<void> updateVan(
+    int id,
+    String name,
+    String salesperson,
+    bool active,
+  ) async {
+    if (name.trim().isEmpty || id == 1 && !active) {
+      throw const FormatException('The default van must remain active.');
+    }
+    if ((await db.query(
+      'vans',
+      where: 'name=? COLLATE NOCASE AND id!=?',
+      whereArgs: [name.trim(), id],
+      limit: 1,
+    )).isNotEmpty) {
+      throw const FormatException('A van with this name already exists.');
+    }
+    final changed = await db.update(
+      'vans',
+      {
+        'name': name.trim(),
+        'salesperson': salesperson.trim(),
+        'active': active ? 1 : 0,
+      },
+      where: 'id=?',
+      whereArgs: [id],
+    );
+    if (changed != 1) throw const FormatException('Van no longer exists.');
+  }
+
+  Future<int> saveDocument({
+    required String kind,
+    required String name,
+    required int? partyId,
+    required String partyName,
+    required String location,
+    required Map<String, Object?> payload,
+    required int total,
+    String notes = '',
+  }) async {
+    if (!{'held_sale', 'quotation', 'purchase_order'}.contains(kind) ||
+        name.trim().isEmpty ||
+        total < 0) {
+      throw const FormatException('Saved document details are invalid.');
+    }
+    _location(location);
+    return db.insert('saved_documents', {
+      'kind': kind,
+      'created': DateTime.now().toUtc().toIso8601String(),
+      'name': name.trim(),
+      'party_id': partyId,
+      'party_name': partyName.trim(),
+      'location': location,
+      'payload': jsonEncode(payload),
+      'total': total,
+      'status': 'open',
+      'notes': notes.trim(),
+    });
+  }
+
+  Map<String, dynamic> documentPayload(DbRow document) {
+    final value = jsonDecode(document['payload'] as String);
+    if (value is! Map<String, dynamic>) {
+      throw const FormatException('Saved document is damaged.');
+    }
+    return value;
+  }
+
+  Future<void> finishDocument(int id, int linkedId) async {
+    final changed = await db.update(
+      'saved_documents',
+      {'status': 'converted', 'linked_id': linkedId},
+      where: 'id=? AND status=?',
+      whereArgs: [id, 'open'],
+    );
+    if (changed != 1) {
+      throw const FormatException('Saved document is no longer open.');
+    }
+  }
+
+  Future<void> deleteDocument(int id) => db.delete(
+    'saved_documents',
+    where: 'id=? AND status=?',
+    whereArgs: [id, 'open'],
+  );
 
   Future<void> saveLanguage(String language) async {
     if (language != 'en' && language != 'ar') {
@@ -480,6 +754,9 @@ class PosStore {
     int? payment, {
     int discount = 0,
     Map<String, int>? paymentBreakdown,
+    Map<int, int>? lineDiscounts,
+    Map<int, int>? unitPrices,
+    int? vanId,
   }) async {
     _location(location);
     if (cart.isEmpty) throw const FormatException('Add an item to the sale.');
@@ -488,6 +765,8 @@ class PosStore {
     }
     return db.transaction((tx) async {
       String customerName = 'Walk-in customer';
+      int? savedVanId;
+      String vanName = '', salesperson = '';
       if (customer != null) {
         final rows = await tx.query(
           'customers',
@@ -499,7 +778,22 @@ class PosStore {
         }
         customerName = rows.first['name'] as String;
       }
-      int subtotal = 0;
+      if (location == 'van') {
+        final vanRows = await tx.query(
+          'vans',
+          where: 'id=? AND active=1',
+          whereArgs: [vanId ?? 1],
+          limit: 1,
+        );
+        if (vanRows.isEmpty) {
+          throw const FormatException('Choose an active van.');
+        }
+        savedVanId = vanRows.single['id'] as int;
+        vanName = vanRows.single['name'] as String;
+        salesperson = vanRows.single['salesperson'] as String;
+      }
+      int itemsTotal = 0;
+      int lineDiscountTotal = 0;
       final items = <DbRow>[];
       for (final entry in cart.entries) {
         if (entry.value <= 0 || entry.value > 1000000) {
@@ -519,28 +813,46 @@ class PosStore {
             'Not enough ${row['name']} stock in $location.',
           );
         }
-        subtotal += (row['price'] as int) * entry.value;
+        final unitPrice = unitPrices?[entry.key] ?? row['price'] as int;
+        if (unitPrice < 0) {
+          throw const FormatException('Item price cannot be negative.');
+        }
+        final lineTotal = unitPrice * entry.value;
+        final lineDiscount = lineDiscounts?[entry.key] ?? 0;
+        if (lineDiscount < 0 || lineDiscount > lineTotal) {
+          throw const FormatException(
+            'Item discount must be between zero and the line total.',
+          );
+        }
+        itemsTotal += lineTotal;
+        lineDiscountTotal += lineDiscount;
         items.add({
           'product_id': entry.key,
           'name': row['name'],
           'quantity': entry.value,
-          'price': row['price'],
+          'price': unitPrice,
           'cost': row['cost'],
+          'discount': lineDiscount,
         });
       }
-      if (discount < 0 || discount > subtotal) {
+      final discountedItemsTotal = itemsTotal - lineDiscountTotal;
+      if (discount < 0 || discount > discountedItemsTotal) {
         throw const FormatException(
           'Discount must be between zero and the items total.',
         );
       }
       int cumulative = 0, allocated = 0;
       for (final item in items) {
-        cumulative += (item['price'] as int) * (item['quantity'] as int);
-        final target = subtotal == 0 ? 0 : discount * cumulative ~/ subtotal;
-        item['discount'] = target - allocated;
+        cumulative +=
+            (item['price'] as int) * (item['quantity'] as int) -
+            (item['discount'] as int);
+        final target = discountedItemsTotal == 0
+            ? 0
+            : discount * cumulative ~/ discountedItemsTotal;
+        item['discount'] = (item['discount'] as int) + target - allocated;
         allocated = target;
       }
-      subtotal -= discount;
+      final subtotal = discountedItemsTotal - discount;
       final tax = (subtotal * taxBps + 5000) ~/ 10000;
       final total = subtotal + tax;
       final paid = payment ?? total;
@@ -563,17 +875,38 @@ class PosStore {
           'Payment methods do not match the total paid.',
         );
       }
+      final counterRow = await tx.query(
+        'settings',
+        where: 'key=?',
+        whereArgs: ['invoice_counter'],
+        limit: 1,
+      );
+      final counter =
+          int.tryParse(
+            counterRow.isEmpty ? '0' : counterRow.single['value'] as String,
+          ) ??
+          0;
+      final nextCounter = counter + 1;
+      await tx.insert('settings', {
+        'key': 'invoice_counter',
+        'value': '$nextCounter',
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
       final id = await tx.insert('sales', {
         'created': DateTime.now().toUtc().toIso8601String(),
         'customer_id': customer,
         'customer_name': customerName,
         'location': location,
         'subtotal': subtotal,
-        'discount': discount,
+        'discount': lineDiscountTotal + discount,
         'tax': tax,
         'total': total,
         'paid': paid,
         'tax_bps': taxBps,
+        'invoice_uuid': _invoiceUuid(),
+        'invoice_counter': nextCounter,
+        'van_id': savedVanId,
+        'van_name': vanName,
+        'salesperson': salesperson,
       });
       for (final item in items) {
         await tx.insert('sale_lines', {...item, 'sale_id': id});
@@ -609,7 +942,7 @@ class PosStore {
     await db.transaction((tx) async {
       final changed = await tx.rawUpdate(
         '''UPDATE sales SET paid=paid+? WHERE id=?
-        AND total-returned-paid+refunded>=?''',
+        AND COALESCE(cancelled,0)=0 AND total-returned-paid+refunded>=?''',
         [payment, sale, payment],
       );
       if (changed != 1) {
@@ -621,6 +954,73 @@ class PosStore {
         'method': method,
         'created': DateTime.now().toUtc().toIso8601String(),
       });
+    });
+  }
+
+  Future<int> cancelSale(
+    int saleId,
+    String reason, {
+    String refundMethod = 'cash',
+  }) async {
+    paymentMethod(refundMethod);
+    if (reason.trim().isEmpty) {
+      throw const FormatException('Enter a cancellation reason.');
+    }
+    return db.transaction((tx) async {
+      final rows = await tx.query(
+        'sales',
+        where: 'id=?',
+        whereArgs: [saleId],
+        limit: 1,
+      );
+      if (rows.isEmpty || (rows.single['cancelled'] as int? ?? 0) == 1) {
+        throw const FormatException('Sale is already cancelled.');
+      }
+      final sale = rows.single;
+      if ((sale['returned'] as int) != 0) {
+        throw const FormatException(
+          'A sale with returns cannot be cancelled. Return its remaining items instead.',
+        );
+      }
+      final location = sale['location'] as String;
+      final lines = await tx.query(
+        'sale_lines',
+        where: 'sale_id=?',
+        whereArgs: [saleId],
+      );
+      for (final line in lines) {
+        await tx.rawUpdate(
+          'UPDATE products SET $location=$location+? WHERE id=?',
+          [line['quantity'], line['product_id']],
+        );
+        await _movement(
+          tx,
+          line['product_id'] as int,
+          location,
+          line['quantity'] as int,
+          'Cancellation for sale #$saleId',
+        );
+      }
+      final created = DateTime.now().toUtc().toIso8601String();
+      await tx.update(
+        'sales',
+        {
+          'cancelled': 1,
+          'cancelled_at': created,
+          'cancellation_reason': reason.trim(),
+        },
+        where: 'id=?',
+        whereArgs: [saleId],
+      );
+      final refund = sale['paid'] as int;
+      await tx.insert('sale_cancellations', {
+        'sale_id': saleId,
+        'created': created,
+        'reason': reason.trim(),
+        'refund': refund,
+        'refund_method': refundMethod,
+      });
+      return refund;
     });
   }
 
@@ -818,6 +1218,9 @@ class PosStore {
       final sales = await tx.query('sales', where: 'id=?', whereArgs: [saleId]);
       if (sales.isEmpty) throw const FormatException('Sale no longer exists.');
       final sale = sales.first;
+      if ((sale['cancelled'] as int? ?? 0) == 1) {
+        throw const FormatException('Cancelled sales cannot be returned.');
+      }
       final location = sale['location'] as String;
       _location(location);
       int subtotal = 0;
@@ -1067,11 +1470,17 @@ class PosStore {
            JOIN purchases p ON p.id=sp.purchase_id
            WHERE p.location=? AND sp.created>=? AND sp.created<? AND sp.method='cash' ''',
       ),
-      'sales_refunds': await value(
-        '''SELECT COALESCE(SUM(r.refund),0) value FROM sale_returns r
+      'sales_refunds':
+          await value(
+            '''SELECT COALESCE(SUM(r.refund),0) value FROM sale_returns r
            JOIN sales s ON s.id=r.sale_id
            WHERE s.location=? AND r.created>=? AND r.created<? AND r.refund_method='cash' ''',
-      ),
+          ) +
+          await value(
+            '''SELECT COALESCE(SUM(c.refund),0) value FROM sale_cancellations c
+           JOIN sales s ON s.id=c.sale_id
+           WHERE s.location=? AND c.created>=? AND c.created<? AND c.refund_method='cash' ''',
+          ),
     };
   }
 
@@ -1222,16 +1631,20 @@ class PosStore {
       args.add(location);
     }
     final where = clauses.isEmpty ? '' : ' WHERE ${clauses.join(' AND ')}';
+    final saleClauses = ['COALESCE(cancelled,0)=0', ...clauses];
+    final saleWhere = ' WHERE ${saleClauses.join(' AND ')}';
     Future<int> value(String sql, [List<Object?>? params]) async =>
         ((await tx.rawQuery(sql, params ?? args)).first['value'] as num)
             .toInt();
-    final sales = 'SELECT id FROM sales$where';
+    final sales = 'SELECT id FROM sales$saleWhere';
     return {
       'net_sales': await value(
-        'SELECT COALESCE(SUM(total-returned),0) value FROM sales$where',
+        'SELECT COALESCE(SUM(total-returned),0) value FROM sales$saleWhere',
       ),
       'sales_tax':
-          await value('SELECT COALESCE(SUM(tax),0) value FROM sales$where') -
+          await value(
+            'SELECT COALESCE(SUM(tax),0) value FROM sales$saleWhere',
+          ) -
           await value(
             'SELECT COALESCE(SUM(tax),0) value FROM sale_returns WHERE sale_id IN ($sales)',
           ),
@@ -1245,7 +1658,7 @@ class PosStore {
         'SELECT COALESCE(SUM(amount),0) value FROM expenses$where',
       ),
       'receivables': await value(
-        'SELECT COALESCE(SUM(total-returned-paid+refunded),0) value FROM sales$where',
+        'SELECT COALESCE(SUM(total-returned-paid+refunded),0) value FROM sales$saleWhere',
       ),
       'payables': await value(
         'SELECT COALESCE(SUM(total-returned-paid+refunded),0) value FROM purchases$where',

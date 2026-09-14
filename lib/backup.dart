@@ -10,6 +10,7 @@ import 'barcode.dart';
 // Parents precede children so foreign keys remain enabled throughout restore.
 const backupTables = [
   'settings',
+  'vans',
   'cash_sessions',
   'products',
   'customers',
@@ -23,8 +24,12 @@ const backupTables = [
   'movements',
   'expenses',
   'sale_returns',
+  'sale_cancellations',
   'purchase_returns',
+  'saved_documents',
 ];
+
+const _advancedBackupTables = {'vans', 'sale_cancellations', 'saved_documents'};
 
 const maxBackupBytes = 25 * 1024 * 1024;
 
@@ -47,7 +52,7 @@ class PosBackup {
       if (envelope is! Map ||
           envelope['format'] != 'rihla-pos-backup' ||
           envelope['format_version'] != 1 ||
-          ![2, 3, 4, 5, 6, 7].contains(envelope['database_version'])) {
+          ![2, 3, 4, 5, 6, 7, 8].contains(envelope['database_version'])) {
         throw const FormatException('This backup format is not supported.');
       }
       final payload = envelope['payload'];
@@ -64,7 +69,9 @@ class PosBackup {
           .where(
             (table) =>
                 (!legacy || table != 'purchase_returns') &&
-                (databaseVersion >= 5 || table != 'cash_sessions'),
+                (databaseVersion >= 5 || table != 'cash_sessions') &&
+                (databaseVersion >= 8 ||
+                    !_advancedBackupTables.contains(table)),
           )
           .toList();
       if (created is! String ||
@@ -76,6 +83,14 @@ class PosBackup {
       }
       final tables = <String, List<DbRow>>{};
       for (final table in backupTables) {
+        if (databaseVersion < 8 && _advancedBackupTables.contains(table)) {
+          tables[table] = table == 'vans'
+              ? const [
+                  {'id': 1, 'name': 'Van 1', 'salesperson': '', 'active': 1},
+                ]
+              : const [];
+          continue;
+        }
         if ((legacy && table == 'purchase_returns') ||
             (databaseVersion < 5 && table == 'cash_sessions')) {
           tables[table] = const [];
@@ -121,6 +136,36 @@ class PosBackup {
               }
               defaults['reorder_level'] = 6;
             }
+            if (databaseVersion < 8 && table == 'sales') {
+              for (final field in const ['cancelled', 'invoice_counter']) {
+                if (row.containsKey(field)) {
+                  throw const FormatException(
+                    'Backup record fields do not match this app.',
+                  );
+                }
+                defaults[field] = 0;
+              }
+              for (final field in const [
+                'cancelled_at',
+                'cancellation_reason',
+                'invoice_uuid',
+                'van_name',
+                'salesperson',
+              ]) {
+                if (row.containsKey(field)) {
+                  throw const FormatException(
+                    'Backup record fields do not match this app.',
+                  );
+                }
+                defaults[field] = '';
+              }
+              if (row.containsKey('van_id')) {
+                throw const FormatException(
+                  'Backup record fields do not match this app.',
+                );
+              }
+              defaults['van_id'] = null;
+            }
             if (legacy) {
               if (table == 'sales' || table == 'sale_lines') {
                 defaults['discount'] = 0;
@@ -161,6 +206,16 @@ class PosBackup {
               !['en', 'ar'].contains(language.single['value']))) {
         throw const FormatException('The backup language setting is invalid.');
       }
+      final vat = settings.where((row) => row['key'] == 'seller_vat');
+      if (vat.length > 1 ||
+          (vat.isNotEmpty &&
+              (vat.single['value'] is! String ||
+                  ((vat.single['value'] as String).isNotEmpty &&
+                      !RegExp(
+                        r'^3\d{13}3$',
+                      ).hasMatch(vat.single['value'] as String))))) {
+        throw const FormatException('The backup seller VAT number is invalid.');
+      }
       return PosBackup._(created, Map.unmodifiable(tables));
     } on FormatException {
       rethrow;
@@ -183,7 +238,7 @@ extension BackupOperations on PosStore {
         jsonEncode({
           'format': 'rihla-pos-backup',
           'format_version': 1,
-          'database_version': 7,
+          'database_version': 8,
           'payload': payload,
           'sha256': sha256.convert(utf8.encode(jsonEncode(payload))).toString(),
         }),
@@ -244,6 +299,32 @@ extension BackupOperations on PosStore {
                 normalizeBarcode(row['barcode'] as String) != row['barcode']) {
               throw const FormatException('Backup barcodes are invalid.');
             }
+            if (table == 'saved_documents') {
+              if (!{
+                    'held_sale',
+                    'quotation',
+                    'purchase_order',
+                  }.contains(row['kind']) ||
+                  !{'open', 'converted'}.contains(row['status'])) {
+                throw const FormatException(
+                  'Backup saved documents are invalid.',
+                );
+              }
+              try {
+                if (jsonDecode(row['payload'] as String)
+                    is! Map<String, dynamic>) {
+                  throw const FormatException(
+                    'Backup saved documents are invalid.',
+                  );
+                }
+              } on FormatException {
+                rethrow;
+              } catch (_) {
+                throw const FormatException(
+                  'Backup saved documents are invalid.',
+                );
+              }
+            }
             if (table == 'products' &&
                 ((row['reorder_level'] as int) < 0 ||
                     (row['reorder_level'] as int) > 1000000)) {
@@ -262,6 +343,16 @@ extension BackupOperations on PosStore {
               conflictAlgorithm: ConflictAlgorithm.abort,
             );
           }
+        }
+        for (final setting in const {
+          'seller_vat': '',
+          'business_address': '',
+          'invoice_counter': '0',
+        }.entries) {
+          await tx.insert('settings', {
+            'key': setting.key,
+            'value': setting.value,
+          }, conflictAlgorithm: ConflictAlgorithm.ignore);
         }
         if ((await tx.rawQuery('PRAGMA foreign_key_check')).isNotEmpty) {
           throw const FormatException(
@@ -292,7 +383,11 @@ Future<void> _validateRestoredLedgers(Transaction tx) async {
        OR COALESCE((SELECT SUM(subtotal) FROM sale_returns WHERE sale_id=s.id),0)!=COALESCE((SELECT SUM(price*returned-discount*returned/quantity) FROM sale_lines WHERE sale_id=s.id),0)
        OR paid!=COALESCE((SELECT SUM(amount) FROM payments WHERE sale_id=s.id),0)
        OR returned!=COALESCE((SELECT SUM(total) FROM sale_returns WHERE sale_id=s.id),0)
-       OR refunded!=COALESCE((SELECT SUM(refund) FROM sale_returns WHERE sale_id=s.id),0)''',
+       OR refunded!=COALESCE((SELECT SUM(refund) FROM sale_returns WHERE sale_id=s.id),0)
+       OR cancelled NOT IN (0,1)
+       OR (cancelled=1 AND (returned!=0 OR cancelled_at='' OR cancellation_reason=''
+         OR NOT EXISTS(SELECT 1 FROM sale_cancellations c WHERE c.sale_id=s.id)))
+       OR (cancelled=0 AND EXISTS(SELECT 1 FROM sale_cancellations c WHERE c.sale_id=s.id))''',
     '''SELECT id FROM sale_returns WHERE subtotal<0 OR tax<0 OR total!=subtotal+tax
        OR refund<0 OR refund>total''',
     '''SELECT id FROM purchases p WHERE
@@ -305,6 +400,11 @@ Future<void> _validateRestoredLedgers(Transaction tx) async {
        OR refunded!=COALESCE((SELECT SUM(refund) FROM purchase_returns WHERE purchase_id=p.id),0)
        OR returned!=COALESCE((SELECT SUM(returned*cost) FROM purchase_lines WHERE purchase_id=p.id),0)''',
     '''SELECT id FROM purchase_lines WHERE returned<0 OR returned>quantity''',
+    '''SELECT c.id FROM sale_cancellations c JOIN sales s ON s.id=c.sale_id
+       WHERE c.reason='' OR c.refund<0 OR c.refund!=s.paid
+       OR c.refund_method NOT IN ('cash','card','bank')''',
+    '''SELECT id FROM vans WHERE name='' OR active NOT IN (0,1)
+       OR (id=1 AND active!=1)''',
     '''SELECT id FROM cash_sessions WHERE opening<0 OR sales_receipts<0
        OR purchase_refunds<0 OR expenses<0 OR supplier_payments<0
        OR sales_refunds<0 OR (location!='shop' AND location!='van')

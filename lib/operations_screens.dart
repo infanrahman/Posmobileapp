@@ -60,6 +60,19 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
       await load();
     },
   );
+  Future<void> statement(DbRow supplier) => Navigator.push(
+    context,
+    MaterialPageRoute(
+      builder: (_) => StatementScreen(
+        store: widget.store,
+        title: 'Supplier statement',
+        party: supplier['name'] as String,
+        loadEntries: () =>
+            widget.store.supplierStatement(supplier['id'] as int),
+      ),
+    ),
+  );
+
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: const UiText('Suppliers')),
@@ -113,22 +126,28 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
                           s['tax_number'],
                         ].where((v) => '$v'.isNotEmpty).join(' • '),
                       ),
-                      trailing: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          UiText(
-                            money(s['balance'] as int),
-                            style: const TextStyle(fontWeight: FontWeight.w700),
+                      trailing: InkWell(
+                        onTap: () => statement(s),
+                        borderRadius: BorderRadius.circular(8),
+                        child: Padding(
+                          padding: const EdgeInsets.all(4),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              UiText(
+                                money(s['balance'] as int),
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              const UiText(
+                                'statement',
+                                style: TextStyle(fontSize: 11, color: teal),
+                              ),
+                            ],
                           ),
-                          const UiText(
-                            'payable',
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: Color(0xFF71818A),
-                            ),
-                          ),
-                        ],
+                        ),
                       ),
                     ),
                   ),
@@ -323,7 +342,24 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const UiText('Purchases')),
+    appBar: AppBar(
+      title: const UiText('Purchases'),
+      actions: [
+        IconButton(
+          tooltip: tr(context, 'Purchase orders'),
+          onPressed: () async {
+            await Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => PurchaseOrdersScreen(store: widget.store),
+              ),
+            );
+            await load();
+          },
+          icon: const Icon(Icons.assignment_outlined),
+        ),
+      ],
+    ),
     floatingActionButton: FloatingActionButton.extended(
       onPressed: add,
       icon: const Icon(Icons.add),
@@ -409,10 +445,12 @@ class PurchaseDraft {
 class PurchaseEditor extends StatefulWidget {
   final PosStore store;
   final String location;
+  final DbRow? document;
   const PurchaseEditor({
     super.key,
     required this.store,
     required this.location,
+    this.document,
   });
   @override
   State<PurchaseEditor> createState() => _PurchaseEditorState();
@@ -446,6 +484,23 @@ class _PurchaseEditorState extends State<PurchaseEditor> {
   Future<void> load() async {
     final p = await widget.store.products();
     final s = await widget.store.suppliers();
+    if (widget.document != null) {
+      final payload = widget.store.documentPayload(widget.document!);
+      supplier = (payload['supplier_id'] as num?)?.toInt();
+      final savedCart = payload['cart'];
+      if (savedCart is Map) {
+        for (final entry in savedCart.entries) {
+          final id = int.tryParse('${entry.key}');
+          if (id == null || entry.value is! Map) continue;
+          final item = entry.value as Map;
+          final quantity = (item['quantity'] as num?)?.toInt() ?? 0;
+          final cost = (item['cost'] as num?)?.toInt() ?? 0;
+          if (quantity > 0 && cost >= 0 && p.any((row) => row['id'] == id)) {
+            cart[id] = PurchaseDraft(quantity, cost);
+          }
+        }
+      }
+    }
     if (mounted) {
       setState(() {
         products = p;
@@ -504,7 +559,7 @@ class _PurchaseEditorState extends State<PurchaseEditor> {
       error = null;
     });
     try {
-      await widget.store.addPurchase(
+      final id = await widget.store.addPurchase(
         {
           for (final e in cart.entries)
             e.key: (quantity: e.value.quantity, cost: e.value.cost),
@@ -518,6 +573,9 @@ class _PurchaseEditorState extends State<PurchaseEditor> {
             : amount(payment.text),
         method: selectedPaymentMethod,
       );
+      if (widget.document != null) {
+        await widget.store.finishDocument(widget.document!['id'] as int, id);
+      }
       if (mounted) {
         Navigator.pop(context);
       }
@@ -533,6 +591,53 @@ class _PurchaseEditorState extends State<PurchaseEditor> {
     }
   }
 
+  Future<void> saveOrder() async {
+    if (cart.isEmpty) return;
+    var saved = false;
+    await entryForm(
+      context,
+      'Save purchase order',
+      [
+        Entry(
+          'Document name',
+          initial:
+              'Purchase order ${DateFormat('yyyy-MM-dd HH:mm').format(DateTime.now())}',
+        ),
+        const Entry('Notes'),
+      ],
+      (values) async {
+        final party = supplier == null
+            ? 'Cash supplier'
+            : suppliers.firstWhere((row) => row['id'] == supplier)['name']
+                  as String;
+        if (widget.document != null && widget.document!['status'] == 'open') {
+          await widget.store.deleteDocument(widget.document!['id'] as int);
+        }
+        await widget.store.saveDocument(
+          kind: 'purchase_order',
+          name: values[0],
+          partyId: supplier,
+          partyName: party,
+          location: widget.location,
+          total: total,
+          notes: values[1],
+          payload: {
+            'supplier_id': supplier,
+            'cart': {
+              for (final entry in cart.entries)
+                '${entry.key}': {
+                  'quantity': entry.value.quantity,
+                  'cost': entry.value.cost,
+                },
+            },
+          },
+        );
+        saved = true;
+      },
+    );
+    if (saved && mounted) Navigator.pop(context);
+  }
+
   @override
   Widget build(BuildContext context) {
     final filtered = products.where(
@@ -541,7 +646,18 @@ class _PurchaseEditorState extends State<PurchaseEditor> {
       ),
     );
     return Scaffold(
-      appBar: AppBar(title: const UiText('New purchase')),
+      appBar: AppBar(
+        title: UiText(
+          widget.document == null ? 'New purchase' : 'Receive purchase order',
+        ),
+        actions: [
+          IconButton(
+            tooltip: tr(context, 'Save purchase order'),
+            onPressed: saving || cart.isEmpty ? null : saveOrder,
+            icon: const Icon(Icons.bookmark_add_outlined),
+          ),
+        ],
+      ),
       body: loading
           ? const Center(child: CircularProgressIndicator())
           : AbsorbPointer(

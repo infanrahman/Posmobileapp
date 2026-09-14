@@ -7,6 +7,7 @@ import 'backup.dart';
 import 'report_export.dart';
 import 'l10n.dart';
 import 'invoice_pdf.dart';
+import 'statement_export.dart';
 import 'store.dart';
 import 'barcode.dart';
 import 'barcode_screen.dart';
@@ -14,8 +15,9 @@ import 'barcode_screen.dart';
 part 'sale_screen.dart';
 part 'operations_screens.dart';
 part 'backup_screen.dart';
+part 'advanced_screens.dart';
 
-const appVersion = '0.9.0';
+const appVersion = '1.0.0';
 
 const ink = Color(0xFF172D36);
 const teal = Color(0xFF087F72);
@@ -408,19 +410,14 @@ class _HomeState extends State<Home> {
       final d = DateTime.parse(s['created'] as String).toLocal();
       return d.year == now.year && d.month == now.month && d.day == now.day;
     }).toList();
-    final revenue = today.fold(
+    final activeToday = today
+        .where((row) => (row['cancelled'] as int? ?? 0) == 0)
+        .toList();
+    final revenue = activeToday.fold(
       0,
       (n, row) => n + (row['total'] as int) - (row['returned'] as int),
     );
-    final due = localSales.fold(
-      0,
-      (n, row) =>
-          n +
-          (row['total'] as int) -
-          (row['returned'] as int) -
-          (row['paid'] as int) +
-          (row['refunded'] as int),
-    );
+    final due = localSales.fold(0, (n, row) => n + saleBalance(row));
     final low = products
         .where(
           (p) =>
@@ -481,7 +478,7 @@ class _HomeState extends State<Home> {
             ),
             const SizedBox(height: 14),
             UiText(
-              '${today.length} sales recorded  •  ${location == 'shop' ? 'Shop counter' : 'Van inventory'}',
+              '${activeToday.length} sales recorded  •  ${location == 'shop' ? 'Shop counter' : 'Van inventory'}',
               style: const TextStyle(color: Color(0xFFB9D2D1)),
             ),
           ],
@@ -655,6 +652,35 @@ class _HomeState extends State<Home> {
         .toList();
     return [
       heading('Sales ledger', 'Every sale. Every payment. Saved locally.'),
+      const SizedBox(height: 14),
+      Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          OutlinedButton.icon(
+            icon: const Icon(Icons.pause_circle_outline),
+            label: const UiText('Held sales'),
+            onPressed: () => openOperation(
+              SavedSalesScreen(
+                store: store!,
+                kind: 'held_sale',
+                settings: settings,
+              ),
+            ),
+          ),
+          OutlinedButton.icon(
+            icon: const Icon(Icons.request_quote_outlined),
+            label: const UiText('Quotations'),
+            onPressed: () => openOperation(
+              SavedSalesScreen(
+                store: store!,
+                kind: 'quotation',
+                settings: settings,
+              ),
+            ),
+          ),
+        ],
+      ),
       searchField('Search invoice or customer'),
       if (filtered.isEmpty)
         empty(
@@ -668,8 +694,11 @@ class _HomeState extends State<Home> {
   }
 
   Widget saleTile(DbRow sale) {
-    final netTotal = (sale['total'] as int) - (sale['returned'] as int);
-    final due = netTotal - (sale['paid'] as int) + (sale['refunded'] as int);
+    final cancelled = (sale['cancelled'] as int? ?? 0) == 1;
+    final netTotal = cancelled
+        ? 0
+        : (sale['total'] as int) - (sale['returned'] as int);
+    final due = saleBalance(sale);
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Card(
@@ -682,7 +711,11 @@ class _HomeState extends State<Home> {
             backgroundColor: const Color(0xFFEAF3F0),
             child: Icon(
               Icons.receipt_long_outlined,
-              color: due == 0 ? teal : const Color(0xFFA96E1D),
+              color: cancelled
+                  ? Colors.redAccent
+                  : due == 0
+                  ? teal
+                  : const Color(0xFFA96E1D),
             ),
           ),
           title: Text(
@@ -704,7 +737,11 @@ class _HomeState extends State<Home> {
                 style: const TextStyle(fontWeight: FontWeight.w700),
               ),
               UiText(
-                due == 0 ? 'Paid' : '${money(due)} due',
+                cancelled
+                    ? 'Cancelled'
+                    : due == 0
+                    ? 'Paid'
+                    : '${money(due)} due',
                 style: TextStyle(
                   fontSize: 11,
                   color: due == 0 ? teal : const Color(0xFFA96E1D),
@@ -1010,6 +1047,36 @@ class _HomeState extends State<Home> {
         ],
       ),
     ),
+    const SizedBox(height: 24),
+    Card(
+      child: Column(
+        children: [
+          ListTile(
+            leading: const Icon(Icons.assignment_outlined, color: teal),
+            title: const UiText('Purchase orders'),
+            subtitle: const UiText('Prepare orders and convert to purchases'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => openOperation(PurchaseOrdersScreen(store: store!)),
+          ),
+          const Divider(height: 1),
+          ListTile(
+            leading: const Icon(Icons.local_shipping_outlined, color: teal),
+            title: const UiText('Vans and salespeople'),
+            subtitle: const UiText('Manage route team profiles'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => openOperation(VansScreen(store: store!)),
+          ),
+          const Divider(height: 1),
+          ListTile(
+            leading: const Icon(Icons.qr_code_2_rounded, color: teal),
+            title: const UiText('ZATCA invoice status'),
+            subtitle: const UiText('Phase 1 QR and Phase 2 readiness'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => openOperation(ZatcaStatusScreen(settings: settings)),
+          ),
+        ],
+      ),
+    ),
     const SizedBox(height: 20),
     empty(
       Icons.offline_pin_outlined,
@@ -1021,7 +1088,7 @@ class _HomeState extends State<Home> {
       child: Padding(
         padding: EdgeInsets.all(20),
         child: UiText(
-          'Save regular backups. Devices do not sync automatically. Saudi e-invoicing and thermal printer support are not configured. Use sample business data while testing.',
+          'Save regular backups. Devices do not sync automatically. Thermal printing uses a printer available through the phone print service. Phase 2 ZATCA integration requires onboarding credentials and an online reporting service.',
           style: TextStyle(color: Color(0xFF71818A), height: 1.6),
         ),
       ),
@@ -1088,9 +1155,16 @@ class _HomeState extends State<Home> {
         initial: (int.parse(settings['tax_bps']!) / 100).toStringAsFixed(2),
         numeric: true,
       ),
+      Entry('Seller VAT number', initial: settings['seller_vat'] ?? ''),
+      Entry('Business address', initial: settings['business_address'] ?? ''),
     ],
     (v) async {
-      await store!.saveSettings(v[0], amount(v[1]));
+      await store!.saveSettings(
+        v[0],
+        amount(v[1]),
+        sellerVat: v[2],
+        businessAddress: v[3],
+      );
       await refresh();
     },
   );
@@ -1317,6 +1391,22 @@ class _HomeState extends State<Home> {
                   );
                 },
               ),
+              OutlinedButton.icon(
+                icon: const Icon(Icons.account_balance_wallet_outlined),
+                label: const UiText('Customer statement'),
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  openOperation(
+                    StatementScreen(
+                      store: store!,
+                      title: 'Customer statement',
+                      party: c['name'] as String,
+                      loadEntries: () =>
+                          store!.customerStatement(c['id'] as int),
+                    ),
+                  );
+                },
+              ),
               const SizedBox(height: 12),
               UiText('Outstanding: ${money(c['balance'] as int)}'),
               const SizedBox(height: 20),
@@ -1328,14 +1418,7 @@ class _HomeState extends State<Home> {
                   subtitle: UiText(
                     '${s['location']} • ${dateLabel(s['created'])}',
                   ),
-                  trailing: UiText(
-                    money(
-                      (s['total'] as int) -
-                          (s['returned'] as int) -
-                          (s['paid'] as int) +
-                          (s['refunded'] as int),
-                    ),
-                  ),
+                  trailing: UiText(money(saleBalance(s))),
                   onTap: () {
                     Navigator.pop(ctx);
                     receipt(s);
@@ -1352,6 +1435,8 @@ class _HomeState extends State<Home> {
   Future<void> receipt(DbRow sale) async {
     final lines = await store!.lines(sale['id'] as int);
     final payments = await store!.salePayments(sale['id'] as int);
+    final cancellations = await store!.saleCancellations(sale['id'] as int);
+    final cancelled = (sale['cancelled'] as int? ?? 0) == 1;
     if (!mounted) return;
     final action = await showModalBottomSheet<String>(
       context: context,
@@ -1363,7 +1448,11 @@ class _HomeState extends State<Home> {
           child: ListView(
             padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
             children: [
-              const Icon(Icons.check_circle_rounded, color: teal, size: 40),
+              Icon(
+                cancelled ? Icons.cancel_rounded : Icons.check_circle_rounded,
+                color: cancelled ? Colors.redAccent : teal,
+                size: 40,
+              ),
               const SizedBox(height: 12),
               UiText(
                 invoiceNo(sale['id'] as int),
@@ -1371,7 +1460,9 @@ class _HomeState extends State<Home> {
                 style: Theme.of(ctx).textTheme.titleLarge,
               ),
               UiText(
-                'Sales record • saved on this device',
+                cancelled
+                    ? 'Cancelled sale • stock restored'
+                    : 'Sales record • saved on this device',
                 textAlign: TextAlign.center,
                 style: const TextStyle(color: teal),
               ),
@@ -1380,7 +1471,26 @@ class _HomeState extends State<Home> {
                 sale['customer_name'] as String,
                 style: Theme.of(ctx).textTheme.titleMedium,
               ),
-              UiText('${dateLabel(sale['created'])} • ${sale['location']}'),
+              UiText(
+                [
+                  dateLabel(sale['created']),
+                  sale['location'],
+                  if ('${sale['van_name'] ?? ''}'.isNotEmpty) sale['van_name'],
+                  if ('${sale['salesperson'] ?? ''}'.isNotEmpty)
+                    sale['salesperson'],
+                ].join(' • '),
+              ),
+              if (cancelled) ...[
+                const SizedBox(height: 8),
+                UiText(
+                  'Cancellation reason: ${sale['cancellation_reason']}',
+                  style: const TextStyle(color: Colors.redAccent),
+                ),
+                if (cancellations.isNotEmpty)
+                  UiText(
+                    'Refund: ${money(cancellations.first['refund'] as int)} • ${cancellations.first['refund_method']}',
+                  ),
+              ],
               const Divider(height: 32),
               ...lines.map(
                 (line) => ListTile(
@@ -1422,14 +1532,7 @@ class _HomeState extends State<Home> {
                 ),
               if ((sale['refunded'] as int) > 0)
                 totalRow('Refunded', -(sale['refunded'] as int)),
-              totalRow(
-                'Balance due',
-                (sale['total'] as int) -
-                    (sale['returned'] as int) -
-                    (sale['paid'] as int) +
-                    (sale['refunded'] as int),
-                bold: true,
-              ),
+              totalRow('Balance due', saleBalance(sale), bold: true),
               const SizedBox(height: 18),
               OutlinedButton.icon(
                 onPressed: exportingPdf
@@ -1445,19 +1548,24 @@ class _HomeState extends State<Home> {
                 icon: const Icon(Icons.share_outlined),
                 label: const UiText('Share PDF'),
               ),
-              if ((sale['total'] as int) -
-                      (sale['returned'] as int) -
-                      (sale['paid'] as int) +
-                      (sale['refunded'] as int) >
-                  0)
+              OutlinedButton.icon(
+                onPressed: exportingPdf
+                    ? null
+                    : () => Navigator.pop(ctx, 'print-receipt'),
+                icon: const Icon(Icons.print_outlined),
+                label: const UiText('Print thermal receipt'),
+              ),
+              if (!cancelled && saleBalance(sale) > 0)
                 FilledButton.icon(
                   onPressed: () => Navigator.pop(ctx, 'collect'),
                   icon: const Icon(Icons.payments_outlined),
                   label: const UiText('Record payment'),
                 ),
-              if (lines.any(
-                (line) => (line['quantity'] as int) > (line['returned'] as int),
-              )) ...[
+              if (!cancelled &&
+                  lines.any(
+                    (line) =>
+                        (line['quantity'] as int) > (line['returned'] as int),
+                  )) ...[
                 const SizedBox(height: 10),
                 OutlinedButton.icon(
                   onPressed: () => Navigator.pop(ctx, 'return'),
@@ -1465,9 +1573,17 @@ class _HomeState extends State<Home> {
                   label: const UiText('Return items'),
                 ),
               ],
+              if (!cancelled && (sale['returned'] as int) == 0) ...[
+                const SizedBox(height: 10),
+                OutlinedButton.icon(
+                  onPressed: () => Navigator.pop(ctx, 'cancel'),
+                  icon: const Icon(Icons.cancel_outlined),
+                  label: const UiText('Cancel sale'),
+                ),
+              ],
               const SizedBox(height: 16),
               const UiText(
-                'Sales record for testing. Saudi e-invoicing is not configured.',
+                'Phase 1 QR is added when a valid seller VAT number is configured. Check ZATCA status before using electronic invoices for compliance.',
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 12, color: Color(0xFF71818A)),
               ),
@@ -1478,6 +1594,36 @@ class _HomeState extends State<Home> {
     );
     if ((action == 'save-pdf' || action == 'share-pdf') && mounted) {
       await exportInvoice(sale, lines, share: action == 'share-pdf');
+    }
+    if (action == 'print-receipt' && mounted) {
+      await printThermalReceipt(sale, lines);
+    }
+    if (action == 'cancel' && mounted) {
+      final method = await choosePaymentMethod(
+        context,
+        title: 'Cancellation refund method',
+      );
+      if (method == null || !mounted) return;
+      await entryForm(
+        context,
+        'Cancel sale',
+        const [Entry('Cancellation reason')],
+        (v) async {
+          final refund = await store!.cancelSale(
+            sale['id'] as int,
+            v[0],
+            refundMethod: method,
+          );
+          await refresh();
+          if (mounted) {
+            toast(
+              refund == 0
+                  ? 'Sale cancelled and stock restored.'
+                  : 'Sale cancelled. Refund ${money(refund)} to the customer.',
+            );
+          }
+        },
+      );
     }
     if (action == 'return' && mounted) {
       final quantities = await showModalBottomSheet<Map<int, int>>(
@@ -1514,11 +1660,7 @@ class _HomeState extends State<Home> {
     if (action == 'collect' && mounted) {
       final method = await choosePaymentMethod(context);
       if (method == null || !mounted) return;
-      final balance =
-          (sale['total'] as int) -
-          (sale['returned'] as int) -
-          (sale['paid'] as int) +
-          (sale['refunded'] as int);
+      final balance = saleBalance(sale);
       await entryForm(
         context,
         'Record customer payment',
@@ -1550,6 +1692,8 @@ class _HomeState extends State<Home> {
         sale: sale,
         lines: lines,
         business: settings['business'] ?? 'My business',
+        sellerVat: settings['seller_vat'] ?? '',
+        businessAddress: settings['business_address'] ?? '',
         language: language,
       );
       if (!mounted) return;
@@ -1576,6 +1720,28 @@ class _HomeState extends State<Home> {
       }
     } catch (_) {
       if (mounted) toast('Could not create the PDF. Please try again.');
+    } finally {
+      exportingPdf = false;
+    }
+  }
+
+  Future<void> printThermalReceipt(DbRow sale, List<DbRow> lines) async {
+    if (exportingPdf) return;
+    exportingPdf = true;
+    try {
+      final bytes = await createThermalReceiptPdf(
+        sale: sale,
+        lines: lines,
+        business: settings['business'] ?? 'My business',
+        language: Localizations.localeOf(context).languageCode,
+        sellerVat: settings['seller_vat'] ?? '',
+      );
+      await Printing.layoutPdf(
+        name: '${invoiceNo(sale['id'] as int)}-receipt',
+        onLayout: (_) async => bytes,
+      );
+    } catch (_) {
+      if (mounted) toast('Could not open the phone print service.');
     } finally {
       exportingPdf = false;
     }

@@ -117,7 +117,7 @@ void main() {
       factory: databaseFactoryFfi,
       path: '${directory.path}/payments.db',
     );
-    expect(await store.db.getVersion(), 7);
+    expect(await store.db.getVersion(), 8);
     expect((await store.salePayments(1)).single['method'], 'cash');
     expect((await store.expenses()).single['method'], 'cash');
     expect(
