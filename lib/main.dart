@@ -4,6 +4,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:printing/printing.dart';
 import 'backup.dart';
+import 'report_export.dart';
 import 'l10n.dart';
 import 'invoice_pdf.dart';
 import 'store.dart';
@@ -14,7 +15,7 @@ part 'sale_screen.dart';
 part 'operations_screens.dart';
 part 'backup_screen.dart';
 
-const appVersion = '0.5.0';
+const appVersion = '0.6.0';
 
 const ink = Color(0xFF172D36);
 const teal = Color(0xFF087F72);
@@ -1034,6 +1035,16 @@ class _HomeState extends State<Home> {
               onTap: () => Navigator.pop(c, 'receive'),
             ),
             ListTile(
+              leading: const Icon(Icons.remove_circle_outline),
+              title: const UiText('Stock adjustment'),
+              onTap: () => Navigator.pop(c, 'adjust'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.history),
+              title: const UiText('Adjustment history'),
+              onTap: () => Navigator.pop(c, 'history'),
+            ),
+            ListTile(
               leading: const Icon(Icons.swap_horiz),
               title: UiText(
                 'Transfer $location → ${location == 'shop' ? 'van' : 'shop'}',
@@ -1045,6 +1056,74 @@ class _HomeState extends State<Home> {
       ),
     );
     if (choice == null || !mounted) return;
+    if (choice == 'history') {
+      final rows = await store!.stockAdjustments(p['id'] as int);
+      if (!mounted) return;
+      await showModalBottomSheet<void>(
+        context: context,
+        showDragHandle: true,
+        builder: (c) => SafeArea(
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              const ListTile(title: UiText('Adjustment history')),
+              if (rows.isEmpty)
+                const ListTile(title: UiText('No adjustments yet')),
+              for (final row in rows)
+                ListTile(
+                  title: UiText(
+                    (row['reason'] as String).replaceFirst('Adjustment: ', ''),
+                  ),
+                  subtitle: Text(
+                    '${tr(c, row['location'] as String)} • ${dateLabel(row['created'])}',
+                  ),
+                  trailing: Text('${row['quantity']}'),
+                ),
+            ],
+          ),
+        ),
+      );
+      return;
+    }
+    if (choice == 'adjust') {
+      final reason = await showModalBottomSheet<String>(
+        context: context,
+        showDragHandle: true,
+        builder: (c) => SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const ListTile(title: UiText('Reason for stock reduction')),
+              for (final reason in ['Damaged', 'Expired', 'Missing'])
+                ListTile(
+                  title: UiText(reason),
+                  onTap: () => Navigator.pop(c, reason),
+                ),
+            ],
+          ),
+        ),
+      );
+      if (reason == null || !mounted) return;
+      final selectedLocation = location;
+      await entryForm(
+        context,
+        'Stock adjustment',
+        const [
+          Entry('Quantity to remove', numeric: true),
+          Entry('Reason / details'),
+        ],
+        (v) async {
+          await store!.adjustStock(
+            p['id'] as int,
+            positiveQuantity(v[0]),
+            selectedLocation,
+            '$reason: ${v[1]}',
+          );
+          await refresh();
+        },
+      );
+      return;
+    }
     if (choice == 'edit') {
       await entryForm(
         context,

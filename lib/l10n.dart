@@ -67,6 +67,30 @@ class UiText extends StatelessWidget {
 }
 
 const arabic = <String, String>{
+  'Stock adjustment': 'تعديل المخزون',
+  'Adjustment history': 'سجل تعديلات المخزون',
+  'No adjustments yet': 'لا توجد تعديلات بعد',
+  'Reason for stock reduction': 'سبب تخفيض المخزون',
+  'Damaged': 'تالف',
+  'Expired': 'منتهي الصلاحية',
+  'Missing': 'مفقود',
+  'Damaged: {details}': 'تالف: {details}',
+  'Expired: {details}': 'منتهي الصلاحية: {details}',
+  'Missing: {details}': 'مفقود: {details}',
+  'Quantity to remove': 'الكمية المراد إزالتها',
+  'Reason / details': 'السبب / التفاصيل',
+  'Shop and van': 'المحل والسيارة',
+  'All dates': 'كل التواريخ',
+  'Export CSV': 'تصدير CSV',
+  'Report exported': 'تم تصدير التقرير',
+  'Could not export report. Please try again.':
+      'تعذر تصدير التقرير. حاول مرة أخرى.',
+  'Current stock value at cost': 'قيمة المخزون الحالية بالتكلفة',
+  'Dates': 'التواريخ',
+  'Location': 'الموقع',
+  'Report': 'التقرير',
+  'Invoices are selected by original date, including all recorded returns and payments. Expenses use their recorded date. Stock value is current for the selected location, independent of dates.':
+      'تُحدد الفواتير بتاريخها الأصلي وتشمل جميع المرتجعات والمدفوعات المسجلة. تُحدد المصروفات بتاريخ تسجيلها. قيمة المخزون حالية للموقع المحدد بصرف النظر عن التواريخ.',
   'Overview': 'الرئيسية',
   'Sales': 'المبيعات',
   'Stock': 'المخزون',

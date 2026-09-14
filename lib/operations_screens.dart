@@ -761,16 +761,101 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
   );
 }
 
-class ReportsScreen extends StatelessWidget {
+class ReportsScreen extends StatefulWidget {
   final PosStore store;
   const ReportsScreen({super.key, required this.store});
+  @override
+  State<ReportsScreen> createState() => _ReportsScreenState();
+}
+
+class _ReportsScreenState extends State<ReportsScreen> {
+  DateTimeRange? dates;
+  String? location;
+  late Future<Map<String, int>> result;
+  bool exporting = false;
+  @override
+  void initState() {
+    super.initState();
+    reload();
+  }
+
+  void reload() {
+    final end = dates?.end;
+    result = widget.store.report(
+      start: dates?.start,
+      end: end == null ? null : DateTime(end.year, end.month, end.day + 1),
+      location: location,
+    );
+  }
+
+  String get dateRange => dates == null
+      ? 'All dates'
+      : '${DateFormat('yyyy-MM-dd').format(dates!.start)} – ${DateFormat('yyyy-MM-dd').format(dates!.end)}';
+  Future<void> chooseDates() async {
+    final selected = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2000),
+      lastDate: DateTime.now(),
+      initialDateRange: dates,
+    );
+    if (selected != null && mounted) {
+      setState(() {
+        dates = selected;
+        reload();
+      });
+    }
+  }
+
+  Future<void> export(Map<String, int> values) async {
+    setState(() => exporting = true);
+    try {
+      final bytes = reportCsv(
+        values,
+        dateRange: tr(context, dateRange),
+        location: tr(context, location ?? 'Shop and van'),
+        translate: (s) => tr(context, s),
+      );
+      final path = await FilePicker.platform.saveFile(
+        dialogTitle: tr(context, 'Export CSV'),
+        fileName: 'rihla-report-${DateTime.now().millisecondsSinceEpoch}.csv',
+        type: FileType.custom,
+        allowedExtensions: ['csv'],
+        bytes: bytes,
+      );
+      if (mounted && path != null) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: UiText('Report exported')));
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: UiText('Could not export report. Please try again.'),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => exporting = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: const UiText('Reports')),
     body: FutureBuilder<Map<String, int>>(
-      future: store.report(),
+      future: result,
       builder: (context, snapshot) {
-        if (!snapshot.hasData) {
+        if (snapshot.hasError) {
+          return Center(
+            child: TextButton(
+              onPressed: () => setState(reload),
+              child: const UiText('Retry'),
+            ),
+          );
+        }
+        if (snapshot.connectionState != ConnectionState.done ||
+            !snapshot.hasData) {
           return const Center(child: CircularProgressIndicator());
         }
         final r = snapshot.data!;
@@ -782,9 +867,54 @@ class ReportsScreen extends StatelessWidget {
               style: Theme.of(context).textTheme.headlineMedium,
             ),
             const SizedBox(height: 6),
+            DropdownButtonFormField<String>(
+              initialValue: location ?? 'all',
+              decoration: InputDecoration(labelText: tr(context, 'Location')),
+              items: [
+                for (final value in ['all', 'shop', 'van'])
+                  DropdownMenuItem(
+                    value: value,
+                    child: UiText(value == 'all' ? 'Shop and van' : value),
+                  ),
+              ],
+              onChanged: exporting
+                  ? null
+                  : (value) => setState(() {
+                      location = value == 'all' ? null : value;
+                      reload();
+                    }),
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: exporting ? null : chooseDates,
+                  icon: const Icon(Icons.date_range),
+                  label: UiText(dateRange),
+                ),
+                if (dates != null)
+                  TextButton(
+                    onPressed: exporting
+                        ? null
+                        : () => setState(() {
+                            dates = null;
+                            reload();
+                          }),
+                    child: const UiText('All dates'),
+                  ),
+                FilledButton.icon(
+                  onPressed: exporting ? null : () => export(r),
+                  icon: const Icon(Icons.download),
+                  label: const UiText('Export CSV'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
             const UiText(
-              'All recorded activity • shop and van combined',
-              style: TextStyle(color: Color(0xFF71818A)),
+              reportBasis,
+              style: TextStyle(color: Color(0xFF71818A), height: 1.4),
             ),
             const SizedBox(height: 22),
             reportCard(
@@ -824,7 +954,7 @@ class ReportsScreen extends StatelessWidget {
             ),
             reportCard(
               context,
-              'Stock value at cost',
+              'Current stock value at cost',
               r['stock_value']!,
               Icons.inventory_2_outlined,
               const Color(0xFF6477AA),

@@ -7,7 +7,7 @@ An offline mobile app for Saudi retail shops and van salespeople. One Flutter co
 - SAR prices and integer-halalah calculations; configurable tax-exclusive sales tax (starts at zero until configured).
 - Products with unique SKUs, selling prices, purchase costs, editing, opening quantities, stock receipts and low-stock indicators.
 - Camera barcode scanning in sales, purchases and inventory, with optional unique product barcodes separate from existing SKUs. Manual code entry remains available if camera access is denied. Recognition is bundled on Android for offline use from first launch; iOS uses native recognition.
-- Separate shop and van quantities, with transfers in either direction.
+- Separate shop and van quantities, with transfers in either direction. Damaged, expired and missing stock can be reduced with a required reason and adjustment history.
 - Cash/fully paid, partial-payment and credit sales. Credit requires a named customer.
 - Transactional checkout: invoice, immutable line prices, stock movements and initial payment are committed together.
 - Partial and complete sales returns, automatic stock restoration and customer refund calculation.
@@ -18,7 +18,7 @@ An offline mobile app for Saudi retail shops and van salespeople. One Flutter co
 - Cash, partial and credit purchases that update stock and save the latest product cost.
 - Partial/full purchase returns remove stock from the original location, reduce supplier debt and record refunds received. Confirm a cash refund only after receiving it from the supplier. Returns retain original costs and do not recalculate the current product cost.
 - Fixed SAR discounts before sales tax, allocated across invoice lines. Profit reports, PDFs and partial sales returns use the saved discounted amounts with integer rounding.
-- Shop and van expenses, plus reports for sales, tax, gross profit, operating profit, receivables, payables and stock value.
+- Shop and van expenses, plus reports for sales, tax, gross profit, operating profit, receivables, payables and stock value. Reports can be filtered by invoice date and shop/van, then exported as an offline CSV file.
 - Business-name and tax settings; data persists across app restarts.
 - Automatic schema migration preserves existing version 1 app data.
 - Manual backup and restore for every business table, with file preview, checksum validation and transactional rollback for invalid records.
@@ -77,7 +77,9 @@ Release signing and store distribution are not configured. The generated Android
 15. Enter **Discount (SAR)** in a new sale to reduce its tax-exclusive subtotal. Discounts must not exceed the items total.
 16. Add or edit a stock item and fill **Barcode (optional)** by typing or using its scan button. Existing **SKU / barcode** values can also be matched. A barcode belongs to one product; ambiguous barcode/SKU matches are rejected.
 17. Tap the scan icon in a new sale to add one unit. Tap it in a new purchase to open the item's quantity and cost form. Inventory scanning opens the matching item's actions. Unknown codes never create or modify products automatically. Show one barcode at a time; reopen the scanner to add another unit.
-18. Close and reopen the app. The saved records, language and quantities remain available without internet. **More** shows the installed app version; this release is **0.5.0 (build 5)**.
+18. Tap an item under **Stock**, then choose **Stock adjustment**. Select damaged, expired or missing, enter the quantity and details, and review it later under **Adjustment history**.
+19. Open **More → Reports** to select all dates or a date range and choose shop, van or both. **Export CSV** saves the displayed report through the device file picker.
+20. Close and reopen the app. The saved records, language and quantities remain available without internet. **More** shows the installed app version; this release is **0.6.0 (build 6)**.
 
 ## Architecture
 
@@ -112,7 +114,7 @@ This is an initial working version, not a complete Vyapar replacement or a Saudi
 SQLite platform reference: https://docs.flutter.dev/cookbook/persistence/sqlite
 
 
-## Validation on 13 September 2026
+## Validation on 14 September 2026
 
 - `flutter analyze`: no issues.
 - Automated tests cover database operations and migration, checkout navigation, backup round trips and rollback, native file flow with a test picker, Arabic persistence and PDF generation. The optional dashboard preview test requires a local preview font.

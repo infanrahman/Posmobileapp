@@ -866,35 +866,97 @@ class PosStore {
     });
   }
 
-  Future<Map<String, int>> report() async {
-    Future<int> value(String sql) async =>
-        (await db.rawQuery(sql)).first['value'] as int;
+  Future<void> adjustStock(
+    int product,
+    int quantity,
+    String location,
+    String reason,
+  ) async {
+    _location(location);
+    if (quantity <= 0 || quantity > 1000000 || reason.trim().isEmpty) {
+      throw const FormatException('Enter a quantity and reason.');
+    }
+    await db.transaction((tx) async {
+      final changed = await tx.rawUpdate(
+        'UPDATE products SET $location=$location-? WHERE id=? AND $location>=?',
+        [quantity, product, quantity],
+      );
+      if (changed != 1) throw const FormatException('Not enough stock.');
+      await _movement(
+        tx,
+        product,
+        location,
+        -quantity,
+        'Adjustment: ${reason.trim()}',
+      );
+    });
+  }
+
+  Future<List<DbRow>> stockAdjustments(int product) => db.query(
+    'movements',
+    where: "product_id=? AND reason LIKE 'Adjustment: %'",
+    whereArgs: [product],
+    orderBy: 'id DESC',
+  );
+
+  // Invoice cohort report: original invoice dates, with all recorded returns
+  // and payments. Stock is current, never a historical stock reconstruction.
+  Future<Map<String, int>> report({
+    DateTime? start,
+    DateTime? end,
+    String? location,
+  }) => db.transaction((tx) async {
+    if (location != null) _location(location);
+    if (start != null && end != null && !start.isBefore(end)) {
+      throw const FormatException('Invalid report dates.');
+    }
+    final clauses = <String>[];
+    final args = <Object?>[];
+    if (start != null) {
+      clauses.add('created>=?');
+      args.add(start.toUtc().toIso8601String());
+    }
+    if (end != null) {
+      clauses.add('created<?');
+      args.add(end.toUtc().toIso8601String());
+    }
+    if (location != null) {
+      clauses.add('location=?');
+      args.add(location);
+    }
+    final where = clauses.isEmpty ? '' : ' WHERE ${clauses.join(' AND ')}';
+    Future<int> value(String sql, [List<Object?>? params]) async =>
+        ((await tx.rawQuery(sql, params ?? args)).first['value'] as num)
+            .toInt();
+    final sales = 'SELECT id FROM sales$where';
     return {
       'net_sales': await value(
-        'SELECT COALESCE(SUM(total-returned),0) value FROM sales',
+        'SELECT COALESCE(SUM(total-returned),0) value FROM sales$where',
       ),
-      'sales_tax': await value(
-        '''SELECT COALESCE((SELECT SUM(tax) FROM sales),0)-
-        COALESCE((SELECT SUM(tax) FROM sale_returns),0) value''',
-      ),
+      'sales_tax':
+          await value('SELECT COALESCE(SUM(tax),0) value FROM sales$where') -
+          await value(
+            'SELECT COALESCE(SUM(tax),0) value FROM sale_returns WHERE sale_id IN ($sales)',
+          ),
       'gross_profit': await value(
-        'SELECT COALESCE(SUM((price-cost)*(quantity-returned)-discount+(discount*returned/quantity)),0) value FROM sale_lines',
+        'SELECT COALESCE(SUM((price-cost)*(quantity-returned)-discount+(discount*returned/quantity)),0) value FROM sale_lines WHERE sale_id IN ($sales)',
       ),
       'purchases': await value(
-        'SELECT COALESCE(SUM(total-returned),0) value FROM purchases',
+        'SELECT COALESCE(SUM(total-returned),0) value FROM purchases$where',
       ),
       'expenses': await value(
-        'SELECT COALESCE(SUM(amount),0) value FROM expenses',
+        'SELECT COALESCE(SUM(amount),0) value FROM expenses$where',
       ),
       'receivables': await value(
-        'SELECT COALESCE(SUM(total-returned-paid+refunded),0) value FROM sales',
+        'SELECT COALESCE(SUM(total-returned-paid+refunded),0) value FROM sales$where',
       ),
       'payables': await value(
-        'SELECT COALESCE(SUM(total-returned-paid+refunded),0) value FROM purchases',
+        'SELECT COALESCE(SUM(total-returned-paid+refunded),0) value FROM purchases$where',
       ),
       'stock_value': await value(
-        'SELECT COALESCE(SUM(cost*(shop+van)),0) value FROM products',
+        'SELECT COALESCE(SUM(cost*${location ?? '(shop+van)'}),0) value FROM products',
+        [],
       ),
     };
-  }
+  });
 }

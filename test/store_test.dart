@@ -233,6 +233,71 @@ void main() {
     expect(report['stock_value'], 240);
   });
 
+  test(
+    'stock adjustments reduce only available stock and keep a reason',
+    () async {
+      await store.addProduct('Dates', 'D01', 200, 5, 'shop', cost: 100);
+
+      await store.adjustStock(1, 2, 'shop', 'Damaged: crushed box');
+      expect((await store.products()).single['shop'], 3);
+      final adjustment = (await store.stockAdjustments(1)).single;
+      expect(adjustment['quantity'], -2);
+      expect(adjustment['location'], 'shop');
+      expect(adjustment['reason'], 'Adjustment: Damaged: crushed box');
+
+      await expectLater(
+        store.adjustStock(1, 4, 'shop', 'Missing: count'),
+        throwsFormatException,
+      );
+      expect((await store.products()).single['shop'], 3);
+      expect(await store.stockAdjustments(1), hasLength(1));
+    },
+  );
+
+  test('reports filter invoice and expense dates and stock location', () async {
+    await store.addProduct('Shop item', 'S01', 200, 5, 'shop', cost: 100);
+    await store.addProduct('Van item', 'V01', 100, 5, 'van', cost: 50);
+    final shopSale = await store.checkout({1: 1}, 'shop', null, 0, null);
+    final vanSale = await store.checkout({2: 1}, 'van', null, 0, null);
+    await store.addExpense('Rent', '', 30, 'shop');
+    await store.addExpense('Fuel', '', 40, 'van');
+    await store.db.update(
+      'sales',
+      {'created': '2026-01-05T12:00:00.000Z'},
+      where: 'id=?',
+      whereArgs: [shopSale],
+    );
+    await store.db.update(
+      'sales',
+      {'created': '2026-02-05T12:00:00.000Z'},
+      where: 'id=?',
+      whereArgs: [vanSale],
+    );
+    final expenses = await store.expenses();
+    await store.db.update(
+      'expenses',
+      {'created': '2026-01-06T12:00:00.000Z'},
+      where: 'id=?',
+      whereArgs: [expenses.last['id']],
+    );
+    await store.db.update(
+      'expenses',
+      {'created': '2026-02-06T12:00:00.000Z'},
+      where: 'id=?',
+      whereArgs: [expenses.first['id']],
+    );
+
+    final report = await store.report(
+      start: DateTime.utc(2026, 1),
+      end: DateTime.utc(2026, 2),
+      location: 'shop',
+    );
+    expect(report['net_sales'], 200);
+    expect(report['gross_profit'], 100);
+    expect(report['expenses'], 30);
+    expect(report['stock_value'], 400);
+  });
+
   test('version 1 database upgrades without losing product data', () async {
     final directory = await Directory.systemTemp.createTemp('rihla_upgrade_');
     final path = '${directory.path}/upgrade.db';
