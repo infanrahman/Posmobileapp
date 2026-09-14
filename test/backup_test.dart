@@ -116,6 +116,9 @@ void main() {
     final legacy = editBackup(await source.exportBackup(), (json) {
       json['database_version'] = 4;
       json['payload']['tables'].remove('cash_sessions');
+      for (final row in json['payload']['tables']['products']) {
+        row.remove('reorder_level');
+      }
       for (final name in ['payments', 'supplier_payments', 'expenses']) {
         for (final row in json['payload']['tables'][name]) {
           row.remove('method');
@@ -129,7 +132,9 @@ void main() {
     });
     await target.restoreBackup(PosBackup.decode(legacy));
     expect(await target.db.query('cash_sessions'), isEmpty);
-    expect((await target.products()).single['name'], 'Water');
+    final product = (await target.products()).single;
+    expect(product['name'], 'Water');
+    expect(product['reorder_level'], 6);
   });
 
   test(

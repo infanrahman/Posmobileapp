@@ -47,7 +47,7 @@ class PosBackup {
       if (envelope is! Map ||
           envelope['format'] != 'rihla-pos-backup' ||
           envelope['format_version'] != 1 ||
-          ![2, 3, 4, 5, 6].contains(envelope['database_version'])) {
+          ![2, 3, 4, 5, 6, 7].contains(envelope['database_version'])) {
         throw const FormatException('This backup format is not supported.');
       }
       final payload = envelope['payload'];
@@ -113,6 +113,14 @@ class PosBackup {
                 defaults[field] = 'cash';
               }
             }
+            if (databaseVersion < 7 && table == 'products') {
+              if (row.containsKey('reorder_level')) {
+                throw const FormatException(
+                  'Backup record fields do not match this app.',
+                );
+              }
+              defaults['reorder_level'] = 6;
+            }
             if (legacy) {
               if (table == 'sales' || table == 'sale_lines') {
                 defaults['discount'] = 0;
@@ -175,7 +183,7 @@ extension BackupOperations on PosStore {
         jsonEncode({
           'format': 'rihla-pos-backup',
           'format_version': 1,
-          'database_version': 6,
+          'database_version': 7,
           'payload': payload,
           'sha256': sha256.convert(utf8.encode(jsonEncode(payload))).toString(),
         }),
@@ -235,6 +243,13 @@ extension BackupOperations on PosStore {
             if (table == 'products' &&
                 normalizeBarcode(row['barcode'] as String) != row['barcode']) {
               throw const FormatException('Backup barcodes are invalid.');
+            }
+            if (table == 'products' &&
+                ((row['reorder_level'] as int) < 0 ||
+                    (row['reorder_level'] as int) > 1000000)) {
+              throw const FormatException(
+                'Backup reorder levels are invalid.',
+              );
             }
           }
         }

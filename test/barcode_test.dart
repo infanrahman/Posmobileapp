@@ -112,6 +112,7 @@ void main() {
         }
         for (final row in j['payload']['tables']['products']) {
           row.remove('barcode');
+          row.remove('reorder_level');
         }
       });
       await store.db.execute('DROP TABLE cash_sessions');
@@ -123,7 +124,7 @@ void main() {
         factory: databaseFactoryFfi,
         path: '${directory.path}/db',
       );
-      expect(await store.db.getVersion(), 6);
+      expect(await store.db.getVersion(), 7);
       expect(await store.report(), report);
       await store.updateProduct(1, 'Changed', 'W01', 100, 0, barcode: '123');
       await store.restoreBackup(PosBackup.decode(legacy));

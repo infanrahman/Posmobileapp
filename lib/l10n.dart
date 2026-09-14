@@ -164,6 +164,22 @@ const arabic = <String, String>{
   "TODAY'S SALES": 'مبيعات اليوم',
   'To collect': 'مبالغ للتحصيل',
   'Low stock': 'مخزون منخفض',
+  'Low stock only ({count})': 'المخزون المنخفض فقط ({count})',
+  'No low-stock items': 'لا توجد أصناف منخفضة المخزون',
+  'Stock is at or above each item’s reorder level.':
+      'المخزون عند حد إعادة الطلب أو أعلى لكل صنف.',
+  'Reorder level': 'حد إعادة الطلب',
+  'Enter a reorder level from 0 to 1,000,000.':
+      'أدخل حد إعادة طلب من ٠ إلى ١٬٠٠٠٬٠٠٠.',
+  'Replenishment list': 'قائمة إعادة التوريد',
+  'Export replenishment CSV': 'تصدير قائمة إعادة التوريد CSV',
+  'Replenishment list exported.': 'تم تصدير قائمة إعادة التوريد.',
+  'Replenishment export cancelled.': 'تم إلغاء تصدير قائمة إعادة التوريد.',
+  'Could not export replenishment list. Please try again.':
+      'تعذر تصدير قائمة إعادة التوريد. حاول مرة أخرى.',
+  'Current stock': 'المخزون الحالي',
+  'Suggested order': 'الطلب المقترح',
+  'Estimated cost (SAR)': 'التكلفة التقديرية (ر.س)',
   'Quick actions': 'إجراءات سريعة',
   'Make a sale': 'بيع جديد',
   'Move stock': 'نقل مخزون',

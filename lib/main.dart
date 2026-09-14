@@ -15,7 +15,7 @@ part 'sale_screen.dart';
 part 'operations_screens.dart';
 part 'backup_screen.dart';
 
-const appVersion = '0.8.0';
+const appVersion = '0.9.0';
 
 const ink = Color(0xFF172D36);
 const teal = Color(0xFF087F72);
@@ -161,6 +161,8 @@ class _HomeState extends State<Home> {
   String? failure;
   bool loading = true;
   bool exportingPdf = false;
+  bool lowStockOnly = false;
+  bool exportingReorderList = false;
   final searchController = TextEditingController();
   @override
   void initState() {
@@ -419,7 +421,13 @@ class _HomeState extends State<Home> {
           (row['paid'] as int) +
           (row['refunded'] as int),
     );
-    final low = products.where((p) => (p[location] as int) <= 5).toList();
+    final low = products
+        .where(
+          (p) =>
+              (p['reorder_level'] as int) > 0 &&
+              (p[location] as int) < (p['reorder_level'] as int),
+        )
+        .toList();
     return [
       UiText(
         location == 'van'
@@ -711,7 +719,20 @@ class _HomeState extends State<Home> {
   }
 
   List<Widget> stockPage() {
-    final filtered = products
+    final low = products
+        .where(
+          (p) =>
+              (p['reorder_level'] as int) > 0 &&
+              (p[location] as int) < (p['reorder_level'] as int),
+        )
+        .toList()
+      ..sort(
+        (a, b) =>
+            ((b['reorder_level'] as int) - (b[location] as int)).compareTo(
+              (a['reorder_level'] as int) - (a[location] as int),
+            ),
+      );
+    final filtered = (lowStockOnly ? low : products)
         .where((p) => matches(p, ['name', 'sku', 'barcode']))
         .toList();
     return [
@@ -720,24 +741,45 @@ class _HomeState extends State<Home> {
         'Receive stock or transfer between shop and van.',
       ),
       searchField('Search item name or SKU'),
-      OutlinedButton.icon(
-        icon: const Icon(Icons.qr_code_scanner),
-        label: const UiText('Scan barcode'),
-        onPressed: () async {
-          final code = await scanBarcode(context);
-          if (code == null || !mounted) return;
-          try {
-            await stockActions(productForBarcode(products, code));
-          } on FormatException catch (e) {
-            if (mounted) toast(e.message);
-          }
-        },
+      Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          OutlinedButton.icon(
+            icon: const Icon(Icons.qr_code_scanner),
+            label: const UiText('Scan barcode'),
+            onPressed: () async {
+              final code = await scanBarcode(context);
+              if (code == null || !mounted) return;
+              try {
+                await stockActions(productForBarcode(products, code));
+              } on FormatException catch (e) {
+                if (mounted) toast(e.message);
+              }
+            },
+          ),
+          FilterChip(
+            selected: lowStockOnly,
+            label: UiText('Low stock only (${low.length})'),
+            avatar: const Icon(Icons.warning_amber_rounded, size: 18),
+            onSelected: (value) => setState(() => lowStockOnly = value),
+          ),
+          OutlinedButton.icon(
+            icon: const Icon(Icons.download_outlined),
+            label: const UiText('Export replenishment CSV'),
+            onPressed: exportingReorderList || low.isEmpty
+                ? null
+                : () => exportReorderList(low),
+          ),
+        ],
       ),
       if (filtered.isEmpty)
         empty(
           Icons.inventory_2_outlined,
-          'No items found',
-          'Add an item with its selling price and opening stock.',
+          lowStockOnly ? 'No low-stock items' : 'No items found',
+          lowStockOnly
+              ? 'Stock is at or above each item’s reorder level.'
+              : 'Add an item with its selling price and opening stock.',
         ),
       ...filtered.map(
         (p) => Padding(
@@ -769,10 +811,16 @@ class _HomeState extends State<Home> {
                     style: const TextStyle(fontWeight: FontWeight.w700),
                   ),
                   UiText(
-                    (p[location] as int) <= 5 ? 'Low stock' : 'In stock',
+                    (p['reorder_level'] as int) > 0 &&
+                            (p[location] as int) <
+                                (p['reorder_level'] as int)
+                        ? 'Low stock'
+                        : 'In stock',
                     style: TextStyle(
                       fontSize: 11,
-                      color: (p[location] as int) <= 5
+                      color: (p['reorder_level'] as int) > 0 &&
+                              (p[location] as int) <
+                                  (p['reorder_level'] as int)
                           ? const Color(0xFFA96E1D)
                           : teal,
                     ),
@@ -991,6 +1039,7 @@ class _HomeState extends State<Home> {
       const Entry('Selling price (SAR)', initial: '0.00', numeric: true),
       const Entry('Purchase cost (SAR)', initial: '0.00', numeric: true),
       const Entry('Opening quantity', initial: '0', numeric: true),
+      const Entry('Reorder level', initial: '6', numeric: true),
       const Entry('Barcode (optional)', scan: true),
     ],
     (v) async {
@@ -1007,7 +1056,8 @@ class _HomeState extends State<Home> {
         qty,
         location,
         cost: amount(v[3]),
-        barcode: v[5],
+        reorderLevel: _reorderLevel(v[5]),
+        barcode: v[6],
       );
       await refresh();
     },
@@ -1183,6 +1233,11 @@ class _HomeState extends State<Home> {
             initial: p['barcode'] as String,
             scan: true,
           ),
+          Entry(
+            'Reorder level',
+            initial: '${p['reorder_level']}',
+            numeric: true,
+          ),
         ],
         (v) async {
           await store!.updateProduct(
@@ -1192,6 +1247,7 @@ class _HomeState extends State<Home> {
             amount(v[2]),
             amount(v[3]),
             barcode: v[4],
+            reorderLevel: _reorderLevel(v[5]),
           );
           await refresh();
         },
@@ -1524,6 +1580,48 @@ class _HomeState extends State<Home> {
       if (mounted) toast('Could not create the PDF. Please try again.');
     } finally {
       exportingPdf = false;
+    }
+  }
+
+  int _reorderLevel(String value) {
+    final level = int.tryParse(value.trim());
+    if (level == null || level < 0 || level > 1000000) {
+      throw const FormatException(
+        'Enter a reorder level from 0 to 1,000,000.',
+      );
+    }
+    return level;
+  }
+
+  Future<void> exportReorderList(List<DbRow> rows) async {
+    if (exportingReorderList) return;
+    setState(() => exportingReorderList = true);
+    try {
+      final saved = await FilePicker.platform.saveFile(
+        dialogTitle: tr(context, 'Export replenishment CSV'),
+        fileName:
+            'rihla-replenishment-$location-${DateTime.now().millisecondsSinceEpoch}.csv',
+        type: FileType.custom,
+        allowedExtensions: ['csv'],
+        bytes: reorderListCsv(
+          rows,
+          location: location,
+          translate: (value) => tr(context, value),
+        ),
+      );
+      if (mounted) {
+        toast(
+          saved == null
+              ? 'Replenishment export cancelled.'
+              : 'Replenishment list exported.',
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        toast('Could not export replenishment list. Please try again.');
+      }
+    } finally {
+      if (mounted) setState(() => exportingReorderList = false);
     }
   }
 }

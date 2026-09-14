@@ -101,3 +101,48 @@ Uint8List cashbookCsv(
     ),
   );
 }
+
+Uint8List reorderListCsv(
+  List<DbRow> products, {
+  required String location,
+  required String Function(String) translate,
+}) {
+  String cell(Object? value) {
+    final text = '$value';
+    final safe = RegExp(r'^[=+@\t\r]').hasMatch(text) ? "'$text" : text;
+    return '"${safe.replaceAll('"', '""')}"';
+  }
+
+  final rows = <List<Object?>>[
+    [translate('Replenishment list')],
+    [translate('Location'), translate(location)],
+    [
+      translate('Item name'),
+      translate('SKU / barcode'),
+      translate('Current stock'),
+      translate('Reorder level'),
+      translate('Suggested order'),
+      translate('Purchase cost (SAR)'),
+      translate('Estimated cost (SAR)'),
+    ],
+    for (final product in products)
+      [
+        product['name'],
+        product['sku'],
+        product[location],
+        product['reorder_level'],
+        (product['reorder_level'] as int) - (product[location] as int),
+        ((product['cost'] as int) / 100).toStringAsFixed(2),
+        (((product['reorder_level'] as int) -
+                    (product[location] as int)) *
+                (product['cost'] as int) /
+            100)
+            .toStringAsFixed(2),
+      ],
+  ];
+  return Uint8List.fromList(
+    utf8.encode(
+      '\uFEFF${rows.map((row) => row.map(cell).join(',')).join('\r\n')}\r\n',
+    ),
+  );
+}

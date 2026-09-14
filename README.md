@@ -5,9 +5,10 @@ An offline mobile app for Saudi retail shops and van salespeople. One Flutter co
 ## Implemented
 
 - SAR prices and integer-halalah calculations; configurable tax-exclusive sales tax (starts at zero until configured).
-- Products with unique SKUs, selling prices, purchase costs, editing, opening quantities, stock receipts and low-stock indicators.
+- Products with unique SKUs, selling prices, purchase costs, editing, opening quantities, stock receipts and configurable reorder levels.
 - Camera barcode scanning in sales, purchases and inventory, with optional unique product barcodes separate from existing SKUs. Manual code entry remains available if camera access is denied. Recognition is bundled on Android for offline use from first launch; iOS uses native recognition.
 - Separate shop and van quantities, with transfers in either direction. Damaged, expired and missing stock can be reduced with a required reason and adjustment history.
+- Shop/van low-stock filters use each product's reorder level and export an offline replenishment CSV with suggested quantities and estimated cost.
 - Cash/fully paid, partial-payment and credit sales. Credit requires a named customer.
 - Cash, card and bank-transfer payment methods for sales, collections, purchases, supplier payments, expenses and refunds. Sales can split one payment between cash and card.
 - Transactional checkout: invoice, immutable line prices, stock movements and initial payment are committed together.
@@ -83,7 +84,8 @@ Release signing and store distribution are not configured. The generated Android
 19. Open **More → Reports** to select all dates or a date range and choose shop, van or both. **Export CSV** saves the displayed report through the device file picker.
 20. Open **More → Daily cashbook**, choose shop or van and enter the opening drawer cash. Recorded sales, collections, refunds, expenses and supplier payments update the expected cash. Count and close the session to save its variance; closing history can be exported as CSV.
 21. Choose cash, card or bank transfer when recording payments, expenses or refunds. In a new sale, choose **Split** and enter the cash and card portions. Reports show received totals by payment method, while the daily cashbook includes only cash.
-22. Close and reopen the app. The saved records, language and quantities remain available without internet. **More** shows the installed app version; this release is **0.8.0 (build 8)**.
+22. Set a **Reorder level** when adding or editing an item. Under **Stock**, choose **Low stock only** for the selected shop/van location and export the replenishment CSV when ordering stock.
+23. Close and reopen the app. The saved records, language and quantities remain available without internet. **More** shows the installed app version; this release is **0.9.0 (build 9)**.
 
 ## Architecture
 
@@ -99,7 +101,7 @@ Release signing and store distribution are not configured. The generated Android
 - `test/widget_test.dart`: phone-sized navigation, complete checkout and reports with a real SQLite test database.
 - `test/preview_test.dart`: optional render with isolated demo data. Enabled by `RIHLA_PREVIEW_FONT`, pointing to a local font file; the font is never copied into the app.
 
-SQLite schema version 6 includes products, customers, suppliers, sales, both types of returns, purchases, expenses, stock movements, payment methods, cash sessions and settings. Upgrades from versions 1 through 5 preserve existing records; earlier payments migrate as cash. Backups from app versions 0.3.0 through 0.7.0 (schemas 2 through 5) can still be restored; new backups require this app version or later. Queries bind user input. Dynamic stock columns are restricted to the internal `shop`/`van` allowlist. Prices and tax totals use integer arithmetic; tax is rounded to the nearest halalah.
+SQLite schema version 7 includes products and reorder levels, customers, suppliers, sales, both types of returns, purchases, expenses, stock movements, payment methods, cash sessions and settings. Upgrades from versions 1 through 6 preserve existing records; existing products receive a reorder level of 6, matching the earlier warning for five units or less. Earlier payments migrate as cash. Backups from app versions 0.3.0 through 0.8.0 (schemas 2 through 6) can still be restored; new backups require this app version or later. Queries bind user input. Dynamic stock columns are restricted to the internal `shop`/`van` allowlist. Prices and tax totals use integer arithmetic; tax is rounded to the nearest halalah.
 
 Barcodes remain text, preserving leading zeroes. UPC-A and its zero-prefixed EAN-13 representation share a key for matching across devices. Barcode values are case-sensitive; SKU matching is case-insensitive. Camera frames are not saved or uploaded by this app. The scanner requests camera access only when opened. See the [scanner package documentation](https://pub.dev/packages/mobile_scanner) for native format support.
 

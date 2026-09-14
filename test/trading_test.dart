@@ -179,6 +179,7 @@ void main() {
       }
       for (final row in tables['products']) {
         row.remove('barcode');
+        row.remove('reorder_level');
       }
       tables.remove('purchase_returns');
       for (final name in ['sales', 'sale_lines']) {
@@ -229,7 +230,7 @@ void main() {
       factory: databaseFactoryFfi,
       path: '${directory.path}/db',
     );
-    expect(await store.db.getVersion(), 6);
+    expect(await store.db.getVersion(), 7);
     expect(await store.report(), report);
     expect((await store.settings())['language'], 'ar');
     expect((await store.sales()).single['discount'], 0);

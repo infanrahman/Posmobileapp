@@ -61,7 +61,7 @@ class PosStore {
     final database = await f.openDatabase(
       path ?? p.join(await f.getDatabasesPath(), 'rihla.db'),
       options: OpenDatabaseOptions(
-        version: 6,
+        version: 7,
         onConfigure: (db) async {
           await db.execute('PRAGMA foreign_keys = ON');
         },
@@ -113,6 +113,7 @@ class PosStore {
           await _upgradeBarcodes(db);
           await _createCashbook(db);
           await _upgradePaymentMethods(db);
+          await _upgradeReorderLevels(db);
         },
         onUpgrade: (db, oldVersion, newVersion) async {
           if (oldVersion < 2) {
@@ -137,6 +138,7 @@ class PosStore {
           if (oldVersion < 4) await _upgradeBarcodes(db);
           if (oldVersion < 5) await _createCashbook(db);
           if (oldVersion < 6) await _upgradePaymentMethods(db);
+          if (oldVersion < 7) await _upgradeReorderLevels(db);
         },
       ),
     );
@@ -206,6 +208,18 @@ class PosStore {
     await add('expenses', 'method');
     await add('sale_returns', 'refund_method');
     await add('purchase_returns', 'refund_method');
+  }
+
+  static Future<void> _upgradeReorderLevels(DatabaseExecutor db) async {
+    final columns = await db.rawQuery('PRAGMA table_info(products)');
+    if (columns.isNotEmpty &&
+        !columns.any((row) => row['name'] == 'reorder_level')) {
+      // Six preserves the previous fixed warning for quantities of five or less.
+      await db.execute(
+        'ALTER TABLE products ADD COLUMN reorder_level INTEGER NOT NULL '
+        'DEFAULT 6 CHECK(reorder_level >= 0)',
+      );
+    }
   }
 
   static Future<void> _createOperations(DatabaseExecutor db) async {
@@ -308,13 +322,16 @@ class PosStore {
     String location, {
     int cost = 0,
     String barcode = '',
+    int reorderLevel = 6,
   }) async {
     _location(location);
     if (name.trim().isEmpty ||
         sku.trim().isEmpty ||
         price < 0 ||
         cost < 0 ||
-        stock < 0) {
+        stock < 0 ||
+        reorderLevel < 0 ||
+        reorderLevel > 1000000) {
       throw const FormatException(
         'Name, unique SKU, price and stock are required.',
       );
@@ -326,6 +343,7 @@ class PosStore {
         'price': price,
         'cost': cost,
         'barcode': normalizeBarcode(barcode),
+        'reorder_level': reorderLevel,
         location: stock,
       });
       if (stock > 0) await _movement(tx, id, location, stock, 'Opening stock');
@@ -339,8 +357,14 @@ class PosStore {
     int price,
     int cost, {
     String? barcode,
+    int? reorderLevel,
   }) async {
-    if (name.trim().isEmpty || sku.trim().isEmpty || price < 0 || cost < 0) {
+    if (name.trim().isEmpty ||
+        sku.trim().isEmpty ||
+        price < 0 ||
+        cost < 0 ||
+        (reorderLevel != null &&
+            (reorderLevel < 0 || reorderLevel > 1000000))) {
       throw const FormatException(
         'Name, unique SKU, cost and price are required.',
       );
@@ -353,6 +377,7 @@ class PosStore {
         'price': price,
         'cost': cost,
         if (barcode != null) 'barcode': normalizeBarcode(barcode),
+        'reorder_level': ?reorderLevel,
       },
       where: 'id=?',
       whereArgs: [id],
