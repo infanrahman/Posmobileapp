@@ -15,13 +15,40 @@ part 'sale_screen.dart';
 part 'operations_screens.dart';
 part 'backup_screen.dart';
 
-const appVersion = '0.7.0';
+const appVersion = '0.8.0';
 
 const ink = Color(0xFF172D36);
 const teal = Color(0xFF087F72);
 const canvas = Color(0xFFF5F7F8);
 String money(int fils) => 'SAR ${NumberFormat('#,##0.00').format(fils / 100)}';
 String invoiceNo(int id) => 'INV-${id.toString().padLeft(5, '0')}';
+Future<String?> choosePaymentMethod(
+  BuildContext context, {
+  String title = 'Payment method',
+}) => showModalBottomSheet<String>(
+  context: context,
+  showDragHandle: true,
+  builder: (sheetContext) => SafeArea(
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        ListTile(title: UiText(title)),
+        for (final method in supportedPaymentMethods)
+          ListTile(
+            leading: Icon(
+              method == 'cash'
+                  ? Icons.payments_outlined
+                  : method == 'card'
+                  ? Icons.credit_card
+                  : Icons.account_balance_outlined,
+            ),
+            title: UiText(method),
+            onTap: () => Navigator.pop(sheetContext, method),
+          ),
+      ],
+    ),
+  ),
+);
 String dateLabel(Object? value) => DateFormat(
   'dd MMM, h:mm a',
 ).format(DateTime.parse(value as String).toLocal());
@@ -1270,6 +1297,7 @@ class _HomeState extends State<Home> {
 
   Future<void> receipt(DbRow sale) async {
     final lines = await store!.lines(sale['id'] as int);
+    final payments = await store!.salePayments(sale['id'] as int);
     if (!mounted) return;
     final action = await showModalBottomSheet<String>(
       context: context,
@@ -1333,6 +1361,11 @@ class _HomeState extends State<Home> {
               if ((sale['returned'] as int) > 0)
                 totalRow('Returns', -(sale['returned'] as int)),
               totalRow('Paid', sale['paid'] as int),
+              for (final payment in payments)
+                totalRow(
+                  '${payment['method']} payment',
+                  payment['amount'] as int,
+                ),
               if ((sale['refunded'] as int) > 0)
                 totalRow('Refunded', -(sale['refunded'] as int)),
               totalRow(
@@ -1400,8 +1433,17 @@ class _HomeState extends State<Home> {
         builder: (_) => ReturnSheet(lines: lines),
       );
       if (quantities != null && mounted) {
+        final method = await choosePaymentMethod(
+          context,
+          title: 'Refund method',
+        );
+        if (method == null || !mounted) return;
         try {
-          final refund = await store!.returnSale(sale['id'] as int, quantities);
+          final refund = await store!.returnSale(
+            sale['id'] as int,
+            quantities,
+            refundMethod: method,
+          );
           await refresh();
           toast(
             refund > 0
@@ -1416,6 +1458,8 @@ class _HomeState extends State<Home> {
       }
     }
     if (action == 'collect' && mounted) {
+      final method = await choosePaymentMethod(context);
+      if (method == null || !mounted) return;
       final balance =
           (sale['total'] as int) -
           (sale['returned'] as int) -
@@ -1432,7 +1476,7 @@ class _HomeState extends State<Home> {
           ),
         ],
         (v) async {
-          await store!.collect(sale['id'] as int, amount(v[0]));
+          await store!.collect(sale['id'] as int, amount(v[0]), method: method);
           await refresh();
         },
       );

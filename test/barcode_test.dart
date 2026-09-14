@@ -100,6 +100,16 @@ void main() {
       final legacy = editBackup(await store.exportBackup(), (j) {
         j['database_version'] = 3;
         j['payload']['tables'].remove('cash_sessions');
+        for (final name in ['payments', 'supplier_payments', 'expenses']) {
+          for (final row in j['payload']['tables'][name]) {
+            row.remove('method');
+          }
+        }
+        for (final name in ['sale_returns', 'purchase_returns']) {
+          for (final row in j['payload']['tables'][name]) {
+            row.remove('refund_method');
+          }
+        }
         for (final row in j['payload']['tables']['products']) {
           row.remove('barcode');
         }
@@ -113,7 +123,7 @@ void main() {
         factory: databaseFactoryFfi,
         path: '${directory.path}/db',
       );
-      expect(await store.db.getVersion(), 5);
+      expect(await store.db.getVersion(), 6);
       expect(await store.report(), report);
       await store.updateProduct(1, 'Changed', 'W01', 100, 0, barcode: '123');
       await store.restoreBackup(PosBackup.decode(legacy));

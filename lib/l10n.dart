@@ -13,7 +13,9 @@ String translateUi(String text, String language) {
     var result = entry.translation;
     for (var i = 0; i < entry.keys.length; i++) {
       var value = match.group(i + 1)!;
-      if (entry.keys[i] == 'location') value = arabic[value] ?? value;
+      if (entry.keys[i] == 'location' || entry.keys[i] == 'method') {
+        value = arabic[value] ?? value;
+      }
       result = result.replaceAll('{${entry.keys[i]}}', value);
     }
     return result;
@@ -67,6 +69,22 @@ class UiText extends StatelessWidget {
 }
 
 const arabic = <String, String>{
+  'Payment method': 'طريقة الدفع',
+  'Refund method': 'طريقة رد المبلغ',
+  'cash': 'نقدي',
+  'card': 'بطاقة',
+  'bank': 'تحويل بنكي',
+  'Split': 'تقسيم',
+  'Cash amount (SAR)': 'المبلغ النقدي (ر.س)',
+  'Card amount (SAR)': 'مبلغ البطاقة (ر.س)',
+  'cash payment': 'دفعة نقدية',
+  'card payment': 'دفعة بطاقة',
+  'bank payment': 'دفعة تحويل بنكي',
+  'Cash received': 'النقد المستلم',
+  'Card received': 'مدفوعات البطاقة المستلمة',
+  'Bank transfer received': 'التحويلات البنكية المستلمة',
+  '{note} • {location} • {method} • {date}':
+      '{note} • {location} • {method} • {date}',
   'Daily cashbook': 'دفتر النقدية اليومي',
   'Opening cash, closing count and variance':
       'النقد الافتتاحي والجرد الختامي والفرق',
@@ -89,6 +107,8 @@ const arabic = <String, String>{
   'Count and close cash': 'جرد النقد وإغلاق الجلسة',
   'Cashbook totals use all recorded payments and refunds as cash. Card payments are not tracked separately.':
       'تعتبر إجماليات دفتر النقدية جميع المدفوعات والمبالغ المرتجعة نقدية. لا يتم تتبع مدفوعات البطاقة بشكل منفصل.',
+  'Cashbook totals include only transactions recorded with Cash as the payment method.':
+      'تشمل إجماليات دفتر النقدية المعاملات المسجلة بطريقة الدفع النقدي فقط.',
   'Closing history': 'سجل الإغلاقات',
   'No closed cash sessions yet': 'لا توجد جلسات نقدية مغلقة بعد',
   'Opened': 'وقت الفتح',

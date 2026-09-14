@@ -9,6 +9,7 @@ An offline mobile app for Saudi retail shops and van salespeople. One Flutter co
 - Camera barcode scanning in sales, purchases and inventory, with optional unique product barcodes separate from existing SKUs. Manual code entry remains available if camera access is denied. Recognition is bundled on Android for offline use from first launch; iOS uses native recognition.
 - Separate shop and van quantities, with transfers in either direction. Damaged, expired and missing stock can be reduced with a required reason and adjustment history.
 - Cash/fully paid, partial-payment and credit sales. Credit requires a named customer.
+- Cash, card and bank-transfer payment methods for sales, collections, purchases, supplier payments, expenses and refunds. Sales can split one payment between cash and card.
 - Transactional checkout: invoice, immutable line prices, stock movements and initial payment are committed together.
 - Partial and complete sales returns, automatic stock restoration and customer refund calculation.
 - Customer details, area/route notes, balances, sales history and payment collection.
@@ -19,7 +20,7 @@ An offline mobile app for Saudi retail shops and van salespeople. One Flutter co
 - Partial/full purchase returns remove stock from the original location, reduce supplier debt and record refunds received. Confirm a cash refund only after receiving it from the supplier. Returns retain original costs and do not recalculate the current product cost.
 - Fixed SAR discounts before sales tax, allocated across invoice lines. Profit reports, PDFs and partial sales returns use the saved discounted amounts with integer rounding.
 - Shop and van expenses, plus reports for sales, tax, gross profit, operating profit, receivables, payables and stock value. Reports can be filtered by invoice date and shop/van, then exported as an offline CSV file.
-- Separate shop and van cash sessions with opening cash, automatic recorded cash flows, expected and actual closing totals, variance history and CSV export.
+- Separate shop and van cash sessions with opening cash, automatic cash-only flows, expected and actual closing totals, variance history and CSV export.
 - Business-name and tax settings; data persists across app restarts.
 - Automatic schema migration preserves existing version 1 app data.
 - Manual backup and restore for every business table, with file preview, checksum validation and transactional rollback for invalid records.
@@ -81,7 +82,8 @@ Release signing and store distribution are not configured. The generated Android
 18. Tap an item under **Stock**, then choose **Stock adjustment**. Select damaged, expired or missing, enter the quantity and details, and review it later under **Adjustment history**.
 19. Open **More → Reports** to select all dates or a date range and choose shop, van or both. **Export CSV** saves the displayed report through the device file picker.
 20. Open **More → Daily cashbook**, choose shop or van and enter the opening drawer cash. Recorded sales, collections, refunds, expenses and supplier payments update the expected cash. Count and close the session to save its variance; closing history can be exported as CSV.
-21. Close and reopen the app. The saved records, language and quantities remain available without internet. **More** shows the installed app version; this release is **0.7.0 (build 7)**.
+21. Choose cash, card or bank transfer when recording payments, expenses or refunds. In a new sale, choose **Split** and enter the cash and card portions. Reports show received totals by payment method, while the daily cashbook includes only cash.
+22. Close and reopen the app. The saved records, language and quantities remain available without internet. **More** shows the installed app version; this release is **0.8.0 (build 8)**.
 
 ## Architecture
 
@@ -97,7 +99,7 @@ Release signing and store distribution are not configured. The generated Android
 - `test/widget_test.dart`: phone-sized navigation, complete checkout and reports with a real SQLite test database.
 - `test/preview_test.dart`: optional render with isolated demo data. Enabled by `RIHLA_PREVIEW_FONT`, pointing to a local font file; the font is never copied into the app.
 
-SQLite schema version 5 includes products, customers, suppliers, sales, both types of returns, purchases, expenses, stock movements, payments, cash sessions and settings. Upgrades from versions 1 through 4 preserve existing records. Backups from app versions 0.3.0 through 0.6.0 (schemas 2 through 4) can still be restored; new backups require this app version or later. Queries bind user input. Dynamic stock columns are restricted to the internal `shop`/`van` allowlist. Prices and tax totals use integer arithmetic; tax is rounded to the nearest halalah.
+SQLite schema version 6 includes products, customers, suppliers, sales, both types of returns, purchases, expenses, stock movements, payment methods, cash sessions and settings. Upgrades from versions 1 through 5 preserve existing records; earlier payments migrate as cash. Backups from app versions 0.3.0 through 0.7.0 (schemas 2 through 5) can still be restored; new backups require this app version or later. Queries bind user input. Dynamic stock columns are restricted to the internal `shop`/`van` allowlist. Prices and tax totals use integer arithmetic; tax is rounded to the nearest halalah.
 
 Barcodes remain text, preserving leading zeroes. UPC-A and its zero-prefixed EAN-13 representation share a key for matching across devices. Barcode values are case-sensitive; SKU matching is case-insensitive. Camera frames are not saved or uploaded by this app. The scanner requests camera access only when opened. See the [scanner package documentation](https://pub.dev/packages/mobile_scanner) for native format support.
 
@@ -109,7 +111,7 @@ This is an initial working version, not a complete Vyapar replacement or a Saudi
 - No multi-device sync or user accounts. Uninstalling the app can remove its data; keep manual backups outside the app. Restoring a backup replaces current records.
 - Shop and van are two locations on **one device**, not shared real-time stock across different phones. No multiple-van identifiers or route scheduling yet.
 - Sale cancellation, purchase orders and percentage discounts are not implemented.
-- No thermal receipt printer or payment terminal integration. Recording a payment does not process a card transaction.
+- No thermal receipt printer or payment terminal integration. Card and bank transfer choices record how money was received; they do not process the transaction.
 - The database is not encrypted; production device access controls and recovery policy remain to be designed.
 - Native Android/iOS device validation, airplane-mode testing, accessibility checks and release signing are still required.
 

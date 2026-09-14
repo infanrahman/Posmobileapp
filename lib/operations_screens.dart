@@ -183,6 +183,7 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
 
   Future<void> details(DbRow purchase) async {
     final lines = await widget.store.purchaseLines(purchase['id'] as int);
+    final payments = await widget.store.purchasePayments(purchase['id'] as int);
     if (!mounted) return;
     final pay = await showModalBottomSheet<String>(
       context: context,
@@ -219,6 +220,11 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
                 const Divider(),
                 totalRow('Total', purchase['total'] as int, bold: true),
                 totalRow('Paid', purchase['paid'] as int),
+                for (final payment in payments)
+                  totalRow(
+                    '${payment['method']} payment',
+                    payment['amount'] as int,
+                  ),
                 totalRow('Returns', purchase['returned'] as int),
                 totalRow(
                   'Supplier refunds received',
@@ -254,10 +260,16 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
         builder: (_) => ReturnSheet(lines: lines, purchase: purchase),
       );
       if (selected != null && mounted) {
+        final method = await choosePaymentMethod(
+          context,
+          title: 'Refund method',
+        );
+        if (method == null || !mounted) return;
         try {
           final refund = await widget.store.returnPurchase(
             purchase['id'] as int,
             selected,
+            refundMethod: method,
           );
           await load();
           if (mounted) {
@@ -285,6 +297,8 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
       }
     }
     if (pay == 'pay' && mounted) {
+      final method = await choosePaymentMethod(context);
+      if (method == null || !mounted) return;
       await entryForm(
         context,
         'Pay supplier',
@@ -296,7 +310,11 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
           ),
         ],
         (v) async {
-          await widget.store.paySupplier(purchase['id'] as int, amount(v[0]));
+          await widget.store.paySupplier(
+            purchase['id'] as int,
+            amount(v[0]),
+            method: method,
+          );
           await load();
         },
       );
@@ -405,7 +423,7 @@ class _PurchaseEditorState extends State<PurchaseEditor> {
   final cart = <int, PurchaseDraft>{};
   final payment = TextEditingController(text: '0.00');
   int? supplier;
-  String paymentMode = 'paid', query = '';
+  String paymentMode = 'paid', query = '', selectedPaymentMethod = 'cash';
   bool loading = true, saving = false;
   bool scanning = false;
   String? error;
@@ -498,6 +516,7 @@ class _PurchaseEditorState extends State<PurchaseEditor> {
             : paymentMode == 'credit'
             ? 0
             : amount(payment.text),
+        method: selectedPaymentMethod,
       );
       if (mounted) {
         Navigator.pop(context);
@@ -617,6 +636,26 @@ class _PurchaseEditorState extends State<PurchaseEditor> {
                     onSelectionChanged: (v) =>
                         setState(() => paymentMode = v.first),
                   ),
+                  if (paymentMode != 'credit')
+                    Padding(
+                      padding: const EdgeInsets.only(top: 14),
+                      child: DropdownButtonFormField<String>(
+                        initialValue: selectedPaymentMethod,
+                        decoration: InputDecoration(
+                          labelText: tr(context, 'Payment method'),
+                        ),
+                        items: [
+                          for (final method in supportedPaymentMethods)
+                            DropdownMenuItem(
+                              value: method,
+                              child: UiText(method),
+                            ),
+                        ],
+                        onChanged: (value) => setState(
+                          () => selectedPaymentMethod = value ?? 'cash',
+                        ),
+                      ),
+                    ),
                   if (paymentMode == 'partial')
                     Padding(
                       padding: const EdgeInsets.only(top: 14),
@@ -685,19 +724,29 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
     }
   }
 
-  Future<void> add() => entryForm(
-    context,
-    'Add expense',
-    const [
-      Entry('Category'),
-      Entry('Description'),
-      Entry('Amount (SAR)', numeric: true),
-    ],
-    (v) async {
-      await widget.store.addExpense(v[0], v[1], amount(v[2]), widget.location);
-      await load();
-    },
-  );
+  Future<void> add() async {
+    final method = await choosePaymentMethod(context);
+    if (method == null || !mounted) return;
+    await entryForm(
+      context,
+      'Add expense',
+      const [
+        Entry('Category'),
+        Entry('Description'),
+        Entry('Amount (SAR)', numeric: true),
+      ],
+      (v) async {
+        await widget.store.addExpense(
+          v[0],
+          v[1],
+          amount(v[2]),
+          widget.location,
+          method: method,
+        );
+        await load();
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -746,7 +795,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                         style: const TextStyle(fontWeight: FontWeight.w700),
                       ),
                       subtitle: UiText(
-                        '${e['note']} • ${e['location']} • ${dateLabel(e['created'])}',
+                        '${e['note']} • ${e['location']} • ${e['method']} • ${dateLabel(e['created'])}',
                       ),
                       trailing: UiText(
                         money(e['amount'] as int),
@@ -962,7 +1011,7 @@ class _CashbookScreenState extends State<CashbookScreen> {
               ),
               const SizedBox(height: 12),
               const UiText(
-                'Cashbook totals use all recorded payments and refunds as cash. Card payments are not tracked separately.',
+                'Cashbook totals include only transactions recorded with Cash as the payment method.',
                 style: TextStyle(
                   fontSize: 12,
                   color: Color(0xFF71818A),
@@ -1190,6 +1239,19 @@ class _ReportsScreenState extends State<ReportsScreen> {
               Icons.payments_outlined,
               const Color(0xFFA96E1D),
             ),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(18),
+                child: Column(
+                  children: [
+                    totalRow('Cash received', r['cash_received']!),
+                    totalRow('Card received', r['card_received']!),
+                    totalRow('Bank transfer received', r['bank_received']!),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
             reportCard(
               context,
               'Receivable',

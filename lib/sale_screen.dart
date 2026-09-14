@@ -18,8 +18,10 @@ class _SaleScreenState extends State<SaleScreen> {
   List<DbRow> products = [], customers = [];
   final cart = <int, int>{};
   final paymentController = TextEditingController(text: '0.00');
+  final splitCashController = TextEditingController(text: '0.00');
+  final splitCardController = TextEditingController(text: '0.00');
   final discountController = TextEditingController(text: '0.00');
-  String query = '', paymentMode = 'paid';
+  String query = '', paymentMode = 'paid', selectedPaymentMethod = 'cash';
   int? customer;
   bool loading = true, saving = false;
   bool scanning = false;
@@ -57,6 +59,8 @@ class _SaleScreenState extends State<SaleScreen> {
   @override
   void dispose() {
     paymentController.dispose();
+    splitCashController.dispose();
+    splitCardController.dispose();
     discountController.dispose();
     super.dispose();
   }
@@ -109,17 +113,32 @@ class _SaleScreenState extends State<SaleScreen> {
       error = null;
     });
     try {
+      final invoiceTotal = subtotal + tax;
+      final paid = switch (paymentMode) {
+        'paid' => invoiceTotal,
+        'credit' => 0,
+        'split' =>
+          amount(splitCashController.text) + amount(splitCardController.text),
+        _ => amount(paymentController.text),
+      };
+      final breakdown = switch (paymentMode) {
+        'credit' => <String, int>{},
+        'split' => <String, int>{
+          if (amount(splitCashController.text) > 0)
+            'cash': amount(splitCashController.text),
+          if (amount(splitCardController.text) > 0)
+            'card': amount(splitCardController.text),
+        },
+        _ => <String, int>{if (paid > 0) selectedPaymentMethod: paid},
+      };
       final id = await widget.store.checkout(
         Map.of(cart),
         widget.location,
         customer,
         taxBps,
-        paymentMode == 'paid'
-            ? null
-            : paymentMode == 'credit'
-            ? 0
-            : amount(paymentController.text),
+        paid,
         discount: amount(discountController.text),
+        paymentBreakdown: breakdown,
       );
       if (!mounted) return;
       Navigator.pop(context);
@@ -446,6 +465,10 @@ class _SaleScreenState extends State<SaleScreen> {
                                 label: UiText('Partial'),
                               ),
                               ButtonSegment(
+                                value: 'split',
+                                label: UiText('Split'),
+                              ),
+                              ButtonSegment(
                                 value: 'credit',
                                 label: UiText('Credit'),
                               ),
@@ -455,18 +478,65 @@ class _SaleScreenState extends State<SaleScreen> {
                                 setState(() => paymentMode = v.first),
                           ),
                           const SizedBox(height: 14),
+                          if (paymentMode == 'paid' || paymentMode == 'partial')
+                            DropdownButtonFormField<String>(
+                              initialValue: selectedPaymentMethod,
+                              decoration: InputDecoration(
+                                labelText: tr(context, 'Payment method'),
+                              ),
+                              items: [
+                                for (final method in supportedPaymentMethods)
+                                  DropdownMenuItem(
+                                    value: method,
+                                    child: UiText(method),
+                                  ),
+                              ],
+                              onChanged: (value) => setState(
+                                () => selectedPaymentMethod = value ?? 'cash',
+                              ),
+                            ),
                           if (paymentMode == 'partial')
+                            Padding(
+                              padding: const EdgeInsets.only(top: 12),
+                              child: TextField(
+                                controller: paymentController,
+                                keyboardType:
+                                    const TextInputType.numberWithOptions(
+                                      decimal: true,
+                                    ),
+                                decoration: InputDecoration(
+                                  labelText: tr(
+                                    context,
+                                    'Amount received (SAR)',
+                                  ),
+                                ),
+                              ),
+                            ),
+                          if (paymentMode == 'split') ...[
                             TextField(
-                              controller: paymentController,
+                              controller: splitCashController,
                               keyboardType:
                                   const TextInputType.numberWithOptions(
                                     decimal: true,
                                   ),
                               decoration: InputDecoration(
-                                labelText: tr(context, 'Amount received (SAR)'),
+                                labelText: tr(context, 'Cash amount (SAR)'),
                               ),
                             ),
-                          if (paymentMode != 'paid')
+                            const SizedBox(height: 10),
+                            TextField(
+                              controller: splitCardController,
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                    decimal: true,
+                                  ),
+                              decoration: InputDecoration(
+                                labelText: tr(context, 'Card amount (SAR)'),
+                              ),
+                            ),
+                          ],
+                          if (paymentMode == 'partial' ||
+                              paymentMode == 'credit')
                             const Padding(
                               padding: EdgeInsets.only(top: 10),
                               child: UiText(

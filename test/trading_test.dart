@@ -167,6 +167,16 @@ void main() {
       j['database_version'] = 2;
       final tables = j['payload']['tables'] as Map;
       tables.remove('cash_sessions');
+      for (final name in ['payments', 'supplier_payments', 'expenses']) {
+        for (final row in tables[name]) {
+          row.remove('method');
+        }
+      }
+      for (final name in ['sale_returns', 'purchase_returns']) {
+        for (final row in tables[name]) {
+          row.remove('refund_method');
+        }
+      }
       for (final row in tables['products']) {
         row.remove('barcode');
       }
@@ -219,7 +229,7 @@ void main() {
       factory: databaseFactoryFfi,
       path: '${directory.path}/db',
     );
-    expect(await store.db.getVersion(), 5);
+    expect(await store.db.getVersion(), 6);
     expect(await store.report(), report);
     expect((await store.settings())['language'], 'ar');
     expect((await store.sales()).single['discount'], 0);

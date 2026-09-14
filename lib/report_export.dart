@@ -13,6 +13,9 @@ const reportLabels = {
   'expenses': 'Expenses',
   'receivables': 'Receivable',
   'payables': 'Payable',
+  'cash_received': 'Cash received',
+  'card_received': 'Card received',
+  'bank_received': 'Bank transfer received',
   'stock_value': 'Current stock value at cost',
 };
 

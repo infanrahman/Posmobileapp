@@ -4,6 +4,15 @@ import 'barcode.dart';
 
 typedef DbRow = Map<String, Object?>;
 
+const supportedPaymentMethods = {'cash', 'card', 'bank'};
+
+String paymentMethod(String value) {
+  if (!supportedPaymentMethods.contains(value)) {
+    throw const FormatException('Choose a valid payment method.');
+  }
+  return value;
+}
+
 int purchaseBalance(DbRow row) =>
     (row['total'] as int) -
     (row['returned'] as int) -
@@ -52,7 +61,7 @@ class PosStore {
     final database = await f.openDatabase(
       path ?? p.join(await f.getDatabasesPath(), 'rihla.db'),
       options: OpenDatabaseOptions(
-        version: 5,
+        version: 6,
         onConfigure: (db) async {
           await db.execute('PRAGMA foreign_keys = ON');
         },
@@ -103,6 +112,7 @@ class PosStore {
           await _upgradeTrading(db);
           await _upgradeBarcodes(db);
           await _createCashbook(db);
+          await _upgradePaymentMethods(db);
         },
         onUpgrade: (db, oldVersion, newVersion) async {
           if (oldVersion < 2) {
@@ -126,6 +136,7 @@ class PosStore {
           if (oldVersion < 3) await _upgradeTrading(db);
           if (oldVersion < 4) await _upgradeBarcodes(db);
           if (oldVersion < 5) await _createCashbook(db);
+          if (oldVersion < 6) await _upgradePaymentMethods(db);
         },
       ),
     );
@@ -180,6 +191,23 @@ class PosStore {
     );
   }
 
+  static Future<void> _upgradePaymentMethods(DatabaseExecutor db) async {
+    Future<void> add(String table, String column) async {
+      final columns = await db.rawQuery('PRAGMA table_info($table)');
+      if (columns.isNotEmpty && !columns.any((row) => row['name'] == column)) {
+        await db.execute(
+          "ALTER TABLE $table ADD COLUMN $column TEXT NOT NULL DEFAULT 'cash'",
+        );
+      }
+    }
+
+    await add('payments', 'method');
+    await add('supplier_payments', 'method');
+    await add('expenses', 'method');
+    await add('sale_returns', 'refund_method');
+    await add('purchase_returns', 'refund_method');
+  }
+
   static Future<void> _createOperations(DatabaseExecutor db) async {
     await db.execute('''CREATE TABLE IF NOT EXISTS suppliers (
       id INTEGER PRIMARY KEY, name TEXT NOT NULL, phone TEXT NOT NULL,
@@ -227,6 +255,13 @@ class PosStore {
   Future<List<DbRow>> purchases() => db.query('purchases', orderBy: 'id DESC');
   Future<List<DbRow>> purchaseLines(int purchase) =>
       db.query('purchase_lines', where: 'purchase_id=?', whereArgs: [purchase]);
+  Future<List<DbRow>> salePayments(int sale) =>
+      db.query('payments', where: 'sale_id=?', whereArgs: [sale]);
+  Future<List<DbRow>> purchasePayments(int purchase) => db.query(
+    'supplier_payments',
+    where: 'purchase_id=?',
+    whereArgs: [purchase],
+  );
   Future<List<DbRow>> expenses() => db.query('expenses', orderBy: 'id DESC');
   Future<Map<String, String>> settings() async => {
     for (final row in await db.query('settings'))
@@ -419,6 +454,7 @@ class PosStore {
     int taxBps,
     int? payment, {
     int discount = 0,
+    Map<String, int>? paymentBreakdown,
   }) async {
     _location(location);
     if (cart.isEmpty) throw const FormatException('Add an item to the sale.');
@@ -491,6 +527,17 @@ class PosStore {
       if (paid < total && customer == null) {
         throw const FormatException('Select a customer for a credit sale.');
       }
+      final methods = paymentBreakdown ?? {if (paid > 0) 'cash': paid};
+      if (methods.entries.any(
+            (entry) =>
+                !supportedPaymentMethods.contains(entry.key) ||
+                entry.value <= 0,
+          ) ||
+          methods.values.fold(0, (sum, value) => sum + value) != paid) {
+        throw const FormatException(
+          'Payment methods do not match the total paid.',
+        );
+      }
       final id = await tx.insert('sales', {
         'created': DateTime.now().toUtc().toIso8601String(),
         'customer_id': customer,
@@ -517,10 +564,11 @@ class PosStore {
           'Sale #$id',
         );
       }
-      if (paid > 0) {
+      for (final entry in methods.entries) {
         await tx.insert('payments', {
           'sale_id': id,
-          'amount': paid,
+          'amount': entry.value,
+          'method': entry.key,
           'created': DateTime.now().toUtc().toIso8601String(),
         });
       }
@@ -528,7 +576,8 @@ class PosStore {
     });
   }
 
-  Future<void> collect(int sale, int payment) async {
+  Future<void> collect(int sale, int payment, {String method = 'cash'}) async {
+    paymentMethod(method);
     if (payment <= 0) {
       throw const FormatException('Payment must be greater than zero.');
     }
@@ -544,6 +593,7 @@ class PosStore {
       await tx.insert('payments', {
         'sale_id': sale,
         'amount': payment,
+        'method': method,
         'created': DateTime.now().toUtc().toIso8601String(),
       });
     });
@@ -594,9 +644,11 @@ class PosStore {
     Map<int, ({int quantity, int cost})> cart,
     String location,
     int? supplier,
-    int? payment,
-  ) async {
+    int? payment, {
+    String method = 'cash',
+  }) async {
     _location(location);
+    paymentMethod(method);
     if (cart.isEmpty) {
       throw const FormatException('Add an item to the purchase.');
     }
@@ -673,13 +725,19 @@ class PosStore {
           'purchase_id': id,
           'created': DateTime.now().toUtc().toIso8601String(),
           'amount': paid,
+          'method': method,
         });
       }
       return id;
     });
   }
 
-  Future<void> paySupplier(int purchase, int payment) async {
+  Future<void> paySupplier(
+    int purchase,
+    int payment, {
+    String method = 'cash',
+  }) async {
+    paymentMethod(method);
     if (payment <= 0) {
       throw const FormatException('Payment must be greater than zero.');
     }
@@ -695,6 +753,7 @@ class PosStore {
         'purchase_id': purchase,
         'created': DateTime.now().toUtc().toIso8601String(),
         'amount': payment,
+        'method': method,
       });
     });
   }
@@ -703,9 +762,11 @@ class PosStore {
     String category,
     String note,
     int value,
-    String location,
-  ) async {
+    String location, {
+    String method = 'cash',
+  }) async {
     _location(location);
+    paymentMethod(method);
     if (category.trim().isEmpty || value <= 0) {
       throw const FormatException('Expense category and amount are required.');
     }
@@ -715,10 +776,16 @@ class PosStore {
       'note': note.trim(),
       'location': location,
       'amount': value,
+      'method': method,
     });
   }
 
-  Future<int> returnSale(int saleId, Map<int, int> quantities) async {
+  Future<int> returnSale(
+    int saleId,
+    Map<int, int> quantities, {
+    String refundMethod = 'cash',
+  }) async {
+    paymentMethod(refundMethod);
     if (quantities.isEmpty) {
       throw const FormatException('Choose at least one item to return.');
     }
@@ -801,12 +868,18 @@ class PosStore {
         'tax': tax,
         'total': total,
         'refund': refund,
+        'refund_method': refundMethod,
       });
       return refund;
     });
   }
 
-  Future<int> returnPurchase(int purchaseId, Map<int, int> quantities) async {
+  Future<int> returnPurchase(
+    int purchaseId,
+    Map<int, int> quantities, {
+    String refundMethod = 'cash',
+  }) async {
+    paymentMethod(refundMethod);
     if (quantities.isEmpty) {
       throw const FormatException('Choose at least one item to return.');
     }
@@ -880,6 +953,7 @@ class PosStore {
         'created': DateTime.now().toUtc().toIso8601String(),
         'total': total,
         'refund': refund,
+        'refund_method': refundMethod,
       });
       return refund;
     });
@@ -952,26 +1026,26 @@ class PosStore {
       'sales_receipts': await value(
         '''SELECT COALESCE(SUM(p.amount),0) value FROM payments p
            JOIN sales s ON s.id=p.sale_id
-           WHERE s.location=? AND p.created>=? AND p.created<?''',
+           WHERE s.location=? AND p.created>=? AND p.created<? AND p.method='cash' ''',
       ),
       'purchase_refunds': await value(
         '''SELECT COALESCE(SUM(r.refund),0) value FROM purchase_returns r
            JOIN purchases p ON p.id=r.purchase_id
-           WHERE p.location=? AND r.created>=? AND r.created<?''',
+           WHERE p.location=? AND r.created>=? AND r.created<? AND r.refund_method='cash' ''',
       ),
       'expenses': await value(
         '''SELECT COALESCE(SUM(amount),0) value FROM expenses
-           WHERE location=? AND created>=? AND created<?''',
+           WHERE location=? AND created>=? AND created<? AND method='cash' ''',
       ),
       'supplier_payments': await value(
         '''SELECT COALESCE(SUM(sp.amount),0) value FROM supplier_payments sp
            JOIN purchases p ON p.id=sp.purchase_id
-           WHERE p.location=? AND sp.created>=? AND sp.created<?''',
+           WHERE p.location=? AND sp.created>=? AND sp.created<? AND sp.method='cash' ''',
       ),
       'sales_refunds': await value(
         '''SELECT COALESCE(SUM(r.refund),0) value FROM sale_returns r
            JOIN sales s ON s.id=r.sale_id
-           WHERE s.location=? AND r.created>=? AND r.created<?''',
+           WHERE s.location=? AND r.created>=? AND r.created<? AND r.refund_method='cash' ''',
       ),
     };
   }
@@ -1151,6 +1225,10 @@ class PosStore {
       'payables': await value(
         'SELECT COALESCE(SUM(total-returned-paid+refunded),0) value FROM purchases$where',
       ),
+      for (final method in supportedPaymentMethods)
+        '${method}_received': await value(
+          "SELECT COALESCE(SUM(amount),0) value FROM payments WHERE method='$method' AND sale_id IN ($sales)",
+        ),
       'stock_value': await value(
         'SELECT COALESCE(SUM(cost*${location ?? '(shop+van)'}),0) value FROM products',
         [],

@@ -81,6 +81,7 @@ void main() {
         findsOneWidget,
       );
       await tap('Confirm return');
+      await tap('cash');
       await tester.pageBack();
       await tester.pumpAndSettle();
       await tap('Sales');
@@ -95,6 +96,21 @@ void main() {
       await tester.enterText(discount, '1.00');
       tester.testTextInput.hide();
       await tester.pumpAndSettle();
+      await tap('Split');
+      await tester.enterText(
+        find.byWidgetPredicate(
+          (w) =>
+              w is TextField && w.decoration?.labelText == 'Cash amount (SAR)',
+        ),
+        '4.00',
+      );
+      await tester.enterText(
+        find.byWidgetPredicate(
+          (w) =>
+              w is TextField && w.decoration?.labelText == 'Card amount (SAR)',
+        ),
+        '5.00',
+      );
       await tap('Complete sale • SAR 9.00');
       await tester.runAsync(() async {
         expect((await store.customers()).single['name'], 'New customer');
@@ -102,6 +118,10 @@ void main() {
         expect((await store.purchases()).single['refunded'], 200);
         expect((await store.sales()).single['discount'], 100);
         expect((await store.sales()).single['total'], 900);
+        expect(
+          (await store.salePayments(1)).map((row) => row['method']).toSet(),
+          {'cash', 'card'},
+        );
         expect((await store.products()).single['shop'], 9);
       });
       await tester.pumpWidget(const SizedBox());
