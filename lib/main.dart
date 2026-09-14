@@ -719,19 +719,18 @@ class _HomeState extends State<Home> {
   }
 
   List<Widget> stockPage() {
-    final low = products
-        .where(
-          (p) =>
-              (p['reorder_level'] as int) > 0 &&
-              (p[location] as int) < (p['reorder_level'] as int),
-        )
-        .toList()
-      ..sort(
-        (a, b) =>
-            ((b['reorder_level'] as int) - (b[location] as int)).compareTo(
-              (a['reorder_level'] as int) - (a[location] as int),
-            ),
-      );
+    final low =
+        products
+            .where(
+              (p) =>
+                  (p['reorder_level'] as int) > 0 &&
+                  (p[location] as int) < (p['reorder_level'] as int),
+            )
+            .toList()
+          ..sort(
+            (a, b) => ((b['reorder_level'] as int) - (b[location] as int))
+                .compareTo((a['reorder_level'] as int) - (a[location] as int)),
+          );
     final filtered = (lowStockOnly ? low : products)
         .where((p) => matches(p, ['name', 'sku', 'barcode']))
         .toList();
@@ -812,15 +811,14 @@ class _HomeState extends State<Home> {
                   ),
                   UiText(
                     (p['reorder_level'] as int) > 0 &&
-                            (p[location] as int) <
-                                (p['reorder_level'] as int)
+                            (p[location] as int) < (p['reorder_level'] as int)
                         ? 'Low stock'
                         : 'In stock',
                     style: TextStyle(
                       fontSize: 11,
-                      color: (p['reorder_level'] as int) > 0 &&
-                              (p[location] as int) <
-                                  (p['reorder_level'] as int)
+                      color:
+                          (p['reorder_level'] as int) > 0 &&
+                              (p[location] as int) < (p['reorder_level'] as int)
                           ? const Color(0xFFA96E1D)
                           : teal,
                     ),
@@ -1586,9 +1584,7 @@ class _HomeState extends State<Home> {
   int _reorderLevel(String value) {
     final level = int.tryParse(value.trim());
     if (level == null || level < 0 || level > 1000000) {
-      throw const FormatException(
-        'Enter a reorder level from 0 to 1,000,000.',
-      );
+      throw const FormatException('Enter a reorder level from 0 to 1,000,000.');
     }
     return level;
   }

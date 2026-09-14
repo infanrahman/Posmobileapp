@@ -133,10 +133,9 @@ Uint8List reorderListCsv(
         product['reorder_level'],
         (product['reorder_level'] as int) - (product[location] as int),
         ((product['cost'] as int) / 100).toStringAsFixed(2),
-        (((product['reorder_level'] as int) -
-                    (product[location] as int)) *
+        (((product['reorder_level'] as int) - (product[location] as int)) *
                 (product['cost'] as int) /
-            100)
+                100)
             .toStringAsFixed(2),
       ],
   ];

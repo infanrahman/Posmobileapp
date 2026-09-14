@@ -247,9 +247,7 @@ extension BackupOperations on PosStore {
             if (table == 'products' &&
                 ((row['reorder_level'] as int) < 0 ||
                     (row['reorder_level'] as int) > 1000000)) {
-              throw const FormatException(
-                'Backup reorder levels are invalid.',
-              );
+              throw const FormatException('Backup reorder levels are invalid.');
             }
           }
         }
