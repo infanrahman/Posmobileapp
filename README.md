@@ -19,6 +19,7 @@ An offline mobile app for Saudi retail shops and van salespeople. One Flutter co
 - Partial/full purchase returns remove stock from the original location, reduce supplier debt and record refunds received. Confirm a cash refund only after receiving it from the supplier. Returns retain original costs and do not recalculate the current product cost.
 - Fixed SAR discounts before sales tax, allocated across invoice lines. Profit reports, PDFs and partial sales returns use the saved discounted amounts with integer rounding.
 - Shop and van expenses, plus reports for sales, tax, gross profit, operating profit, receivables, payables and stock value. Reports can be filtered by invoice date and shop/van, then exported as an offline CSV file.
+- Separate shop and van cash sessions with opening cash, automatic recorded cash flows, expected and actual closing totals, variance history and CSV export.
 - Business-name and tax settings; data persists across app restarts.
 - Automatic schema migration preserves existing version 1 app data.
 - Manual backup and restore for every business table, with file preview, checksum validation and transactional rollback for invalid records.
@@ -79,14 +80,15 @@ Release signing and store distribution are not configured. The generated Android
 17. Tap the scan icon in a new sale to add one unit. Tap it in a new purchase to open the item's quantity and cost form. Inventory scanning opens the matching item's actions. Unknown codes never create or modify products automatically. Show one barcode at a time; reopen the scanner to add another unit.
 18. Tap an item under **Stock**, then choose **Stock adjustment**. Select damaged, expired or missing, enter the quantity and details, and review it later under **Adjustment history**.
 19. Open **More → Reports** to select all dates or a date range and choose shop, van or both. **Export CSV** saves the displayed report through the device file picker.
-20. Close and reopen the app. The saved records, language and quantities remain available without internet. **More** shows the installed app version; this release is **0.6.0 (build 6)**.
+20. Open **More → Daily cashbook**, choose shop or van and enter the opening drawer cash. Recorded sales, collections, refunds, expenses and supplier payments update the expected cash. Count and close the session to save its variance; closing history can be exported as CSV.
+21. Close and reopen the app. The saved records, language and quantities remain available without internet. **More** shows the installed app version; this release is **0.7.0 (build 7)**.
 
 ## Architecture
 
 - `lib/store.dart`: schema, validation, money parsing and transactional database operations.
 - `lib/main.dart`: app theme, dashboard, inventory, customer ledger, settings and forms.
 - `lib/sale_screen.dart`: checkout and payment selection.
-- `lib/operations_screens.dart`: suppliers, purchases, expenses, reports and sales return screens.
+- `lib/operations_screens.dart`: suppliers, purchases, expenses, daily cashbook, reports and sales return screens.
 - `lib/backup.dart` and `lib/backup_screen.dart`: complete database snapshots, validation, atomic restore and native file selection.
 - `lib/l10n.dart`: Arabic interface translations and dynamic labels; user-entered product and business names remain unchanged.
 - `lib/invoice_pdf.dart`: offline invoice PDFs using bundled Amiri fonts.
@@ -95,7 +97,7 @@ Release signing and store distribution are not configured. The generated Android
 - `test/widget_test.dart`: phone-sized navigation, complete checkout and reports with a real SQLite test database.
 - `test/preview_test.dart`: optional render with isolated demo data. Enabled by `RIHLA_PREVIEW_FONT`, pointing to a local font file; the font is never copied into the app.
 
-SQLite schema version 4 includes products, customers, suppliers, sales, both types of returns, purchases, expenses, stock movements, payments and settings. Upgrades from versions 1, 2 and 3 preserve existing records. Backups from app versions 0.3.0 and 0.4.0 (schemas 2 and 3) can still be restored; new backups require this app version or later. Queries bind user input. Dynamic stock columns are restricted to the internal `shop`/`van` allowlist. Prices and tax totals use integer arithmetic; tax is rounded to the nearest halalah.
+SQLite schema version 5 includes products, customers, suppliers, sales, both types of returns, purchases, expenses, stock movements, payments, cash sessions and settings. Upgrades from versions 1 through 4 preserve existing records. Backups from app versions 0.3.0 through 0.6.0 (schemas 2 through 4) can still be restored; new backups require this app version or later. Queries bind user input. Dynamic stock columns are restricted to the internal `shop`/`van` allowlist. Prices and tax totals use integer arithmetic; tax is rounded to the nearest halalah.
 
 Barcodes remain text, preserving leading zeroes. UPC-A and its zero-prefixed EAN-13 representation share a key for matching across devices. Barcode values are case-sensitive; SKU matching is case-insensitive. Camera frames are not saved or uploaded by this app. The scanner requests camera access only when opened. See the [scanner package documentation](https://pub.dev/packages/mobile_scanner) for native format support.
 

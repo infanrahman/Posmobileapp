@@ -99,10 +99,12 @@ void main() {
       final report = await store.report();
       final legacy = editBackup(await store.exportBackup(), (j) {
         j['database_version'] = 3;
+        j['payload']['tables'].remove('cash_sessions');
         for (final row in j['payload']['tables']['products']) {
           row.remove('barcode');
         }
       });
+      await store.db.execute('DROP TABLE cash_sessions');
       await store.db.execute('DROP INDEX product_barcode_unique');
       await store.db.execute('ALTER TABLE products DROP COLUMN barcode');
       await store.db.setVersion(3);
@@ -111,7 +113,7 @@ void main() {
         factory: databaseFactoryFfi,
         path: '${directory.path}/db',
       );
-      expect(await store.db.getVersion(), 4);
+      expect(await store.db.getVersion(), 5);
       expect(await store.report(), report);
       await store.updateProduct(1, 'Changed', 'W01', 100, 0, barcode: '123');
       await store.restoreBackup(PosBackup.decode(legacy));

@@ -15,7 +15,7 @@ part 'sale_screen.dart';
 part 'operations_screens.dart';
 part 'backup_screen.dart';
 
-const appVersion = '0.6.0';
+const appVersion = '0.7.0';
 
 const ink = Color(0xFF172D36);
 const teal = Color(0xFF087F72);
@@ -923,6 +923,16 @@ class _HomeState extends State<Home> {
               '${(int.parse(settings['tax_bps'] ?? '0') / 100).toStringAsFixed(2)}% • prices exclude tax',
             ),
             onTap: editSettings,
+          ),
+          const Divider(height: 1),
+          ListTile(
+            leading: const Icon(Icons.point_of_sale_outlined, color: teal),
+            title: const UiText('Daily cashbook'),
+            subtitle: const UiText('Opening cash, closing count and variance'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => openOperation(
+              CashbookScreen(store: store!, initialLocation: location),
+            ),
           ),
         ],
       ),

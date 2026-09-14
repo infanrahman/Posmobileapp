@@ -67,6 +67,40 @@ class UiText extends StatelessWidget {
 }
 
 const arabic = <String, String>{
+  'Daily cashbook': 'دفتر النقدية اليومي',
+  'Opening cash, closing count and variance':
+      'النقد الافتتاحي والجرد الختامي والفرق',
+  'Open cash session': 'فتح جلسة نقدية',
+  'Close cash session': 'إغلاق الجلسة النقدية',
+  'Opening cash (SAR)': 'النقد الافتتاحي (ر.س)',
+  'Actual cash counted (SAR)': 'النقد الفعلي المحسوب (ر.س)',
+  'No open cash session': 'لا توجد جلسة نقدية مفتوحة',
+  'Enter the cash in the drawer before starting sales.':
+      'أدخل النقد الموجود في الدرج قبل بدء المبيعات.',
+  'Opening cash': 'النقد الافتتاحي',
+  'Sales and collections': 'المبيعات والتحصيلات',
+  'Purchase refunds': 'مبالغ مرتجعات المشتريات',
+  'Supplier payments': 'مدفوعات الموردين',
+  'Sales refunds': 'مبالغ مرتجعات المبيعات',
+  'Expected cash': 'النقد المتوقع',
+  'Actual cash': 'النقد الفعلي',
+  'Variance': 'الفرق',
+  'Variance {amount}': 'الفرق {amount}',
+  'Count and close cash': 'جرد النقد وإغلاق الجلسة',
+  'Cashbook totals use all recorded payments and refunds as cash. Card payments are not tracked separately.':
+      'تعتبر إجماليات دفتر النقدية جميع المدفوعات والمبالغ المرتجعة نقدية. لا يتم تتبع مدفوعات البطاقة بشكل منفصل.',
+  'Closing history': 'سجل الإغلاقات',
+  'No closed cash sessions yet': 'لا توجد جلسات نقدية مغلقة بعد',
+  'Opened': 'وقت الفتح',
+  'Closed': 'وقت الإغلاق',
+  'Opened {date}': 'فُتحت {date}',
+  'Export cashbook CSV': 'تصدير دفتر النقدية CSV',
+  'Cashbook exported': 'تم تصدير دفتر النقدية',
+  'Could not export cashbook. Please try again.':
+      'تعذر تصدير دفتر النقدية. حاول مرة أخرى.',
+  '{count} cash sessions': '{count} جلسات نقدية',
+  'Backups include products, shop and van stock, customers, suppliers, sales, purchases, payments, returns, expenses, cash sessions and settings.':
+      'تشمل النسخ الاحتياطية المنتجات ومخزون المحل والسيارة والعملاء والموردين والمبيعات والمشتريات والمدفوعات والمرتجعات والمصروفات والجلسات النقدية والإعدادات.',
   'Stock adjustment': 'تعديل المخزون',
   'Adjustment history': 'سجل تعديلات المخزون',
   'No adjustments yet': 'لا توجد تعديلات بعد',

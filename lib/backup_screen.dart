@@ -94,6 +94,7 @@ class _BackupScreenState extends State<BackupScreen> {
               UiText('${backup.count('sales')} sales'),
               UiText('${backup.count('purchases')} purchases'),
               UiText('${backup.count('expenses')} expenses'),
+              UiText('${backup.count('cash_sessions')} cash sessions'),
               const SizedBox(height: 16),
               const UiText(
                 'This replaces all records on this phone, including payments, '
@@ -138,7 +139,7 @@ class _BackupScreenState extends State<BackupScreen> {
             const SizedBox(height: 12),
             const UiText(
               'Backups include products, shop and van stock, customers, suppliers, '
-              'sales, purchases, payments, returns, expenses and settings.',
+              'sales, purchases, payments, returns, expenses, cash sessions and settings.',
             ),
             const SizedBox(height: 24),
             Card(

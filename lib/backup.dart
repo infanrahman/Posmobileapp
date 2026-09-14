@@ -10,6 +10,7 @@ import 'barcode.dart';
 // Parents precede children so foreign keys remain enabled throughout restore.
 const backupTables = [
   'settings',
+  'cash_sessions',
   'products',
   'customers',
   'suppliers',
@@ -46,7 +47,7 @@ class PosBackup {
       if (envelope is! Map ||
           envelope['format'] != 'rihla-pos-backup' ||
           envelope['format_version'] != 1 ||
-          ![2, 3, 4].contains(envelope['database_version'])) {
+          ![2, 3, 4, 5].contains(envelope['database_version'])) {
         throw const FormatException('This backup format is not supported.');
       }
       final payload = envelope['payload'];
@@ -57,9 +58,14 @@ class PosBackup {
       }
       final created = payload['created'];
       final rows = payload['tables'];
-      final legacy = envelope['database_version'] == 2;
+      final databaseVersion = envelope['database_version'] as int;
+      final legacy = databaseVersion == 2;
       final expectedTables = backupTables
-          .where((t) => !legacy || t != 'purchase_returns')
+          .where(
+            (table) =>
+                (!legacy || table != 'purchase_returns') &&
+                (databaseVersion >= 5 || table != 'cash_sessions'),
+          )
           .toList();
       if (created is! String ||
           DateTime.tryParse(created) == null ||
@@ -70,7 +76,8 @@ class PosBackup {
       }
       final tables = <String, List<DbRow>>{};
       for (final table in backupTables) {
-        if (legacy && table == 'purchase_returns') {
+        if ((legacy && table == 'purchase_returns') ||
+            (databaseVersion < 5 && table == 'cash_sessions')) {
           tables[table] = const [];
           continue;
         }
@@ -83,7 +90,7 @@ class PosBackup {
               throw const FormatException('Invalid backup record.');
             }
             final defaults = <String, Object?>{};
-            if (envelope['database_version'] < 4 && table == 'products') {
+            if (databaseVersion < 4 && table == 'products') {
               if (row.containsKey('barcode')) {
                 throw const FormatException(
                   'Backup record fields do not match this app.',
@@ -153,7 +160,7 @@ extension BackupOperations on PosStore {
         jsonEncode({
           'format': 'rihla-pos-backup',
           'format_version': 1,
-          'database_version': 4,
+          'database_version': 5,
           'payload': payload,
           'sha256': sha256.convert(utf8.encode(jsonEncode(payload))).toString(),
         }),
@@ -264,6 +271,14 @@ Future<void> _validateRestoredLedgers(Transaction tx) async {
        OR refunded!=COALESCE((SELECT SUM(refund) FROM purchase_returns WHERE purchase_id=p.id),0)
        OR returned!=COALESCE((SELECT SUM(returned*cost) FROM purchase_lines WHERE purchase_id=p.id),0)''',
     '''SELECT id FROM purchase_lines WHERE returned<0 OR returned>quantity''',
+    '''SELECT id FROM cash_sessions WHERE opening<0 OR sales_receipts<0
+       OR purchase_refunds<0 OR expenses<0 OR supplier_payments<0
+       OR sales_refunds<0 OR (location!='shop' AND location!='van')
+       OR (closed IS NULL AND (actual IS NOT NULL OR sales_receipts!=0
+         OR purchase_refunds!=0 OR expenses!=0 OR supplier_payments!=0
+         OR sales_refunds!=0 OR expected!=opening))
+       OR (closed IS NOT NULL AND (actual IS NULL OR
+         expected!=opening+sales_receipts+purchase_refunds-expenses-supplier_payments-sales_refunds))''',
   ];
   for (final sql in checks) {
     if ((await tx.rawQuery('$sql LIMIT 1')).isNotEmpty) {

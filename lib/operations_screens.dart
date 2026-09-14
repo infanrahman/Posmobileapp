@@ -761,6 +761,258 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
   );
 }
 
+class CashbookScreen extends StatefulWidget {
+  final PosStore store;
+  final String initialLocation;
+  const CashbookScreen({
+    super.key,
+    required this.store,
+    required this.initialLocation,
+  });
+  @override
+  State<CashbookScreen> createState() => _CashbookScreenState();
+}
+
+class _CashbookScreenState extends State<CashbookScreen> {
+  late String location;
+  DbRow? openSession;
+  Map<String, int> summary = {};
+  List<DbRow> history = [];
+  bool loading = true;
+  bool exporting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    location = widget.initialLocation;
+    load();
+  }
+
+  Future<void> load() async {
+    final selected = location;
+    if (mounted) setState(() => loading = true);
+    final current = await widget.store.openCashSession(selected);
+    final totals = current == null
+        ? <String, int>{}
+        : await widget.store.cashSessionSummary(current['id'] as int);
+    final previous = await widget.store.cashSessionHistory(selected);
+    if (mounted && selected == location) {
+      setState(() {
+        openSession = current;
+        summary = totals;
+        history = previous;
+        loading = false;
+      });
+    }
+  }
+
+  Future<void> open() => entryForm(
+    context,
+    'Open cash session',
+    const [Entry('Opening cash (SAR)', numeric: true)],
+    (values) async {
+      await widget.store.startCashSession(location, amount(values[0]));
+      await load();
+    },
+  );
+
+  Future<void> close() => entryForm(
+    context,
+    'Close cash session',
+    const [Entry('Actual cash counted (SAR)', numeric: true)],
+    (values) async {
+      await widget.store.closeCashSession(
+        openSession!['id'] as int,
+        amount(values[0]),
+        '',
+      );
+      await load();
+    },
+  );
+
+  Future<void> export() async {
+    setState(() => exporting = true);
+    try {
+      final bytes = cashbookCsv(
+        history,
+        location: tr(context, location),
+        translate: (value) => tr(context, value),
+      );
+      final path = await FilePicker.platform.saveFile(
+        dialogTitle: tr(context, 'Export cashbook CSV'),
+        fileName:
+            'rihla-cashbook-$location-${DateTime.now().millisecondsSinceEpoch}.csv',
+        type: FileType.custom,
+        allowedExtensions: ['csv'],
+        bytes: bytes,
+      );
+      if (mounted && path != null) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: UiText('Cashbook exported')));
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: UiText('Could not export cashbook. Please try again.'),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => exporting = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(
+      title: const UiText('Daily cashbook'),
+      actions: [
+        IconButton(
+          tooltip: tr(context, 'Refresh'),
+          onPressed: loading ? null : load,
+          icon: const Icon(Icons.refresh),
+        ),
+        IconButton(
+          tooltip: tr(context, 'Export cashbook CSV'),
+          onPressed: exporting || history.isEmpty ? null : export,
+          icon: const Icon(Icons.download),
+        ),
+      ],
+    ),
+    body: loading
+        ? const Center(child: CircularProgressIndicator())
+        : ListView(
+            padding: const EdgeInsets.all(20),
+            children: [
+              DropdownButtonFormField<String>(
+                initialValue: location,
+                decoration: InputDecoration(labelText: tr(context, 'Location')),
+                items: const [
+                  DropdownMenuItem(value: 'shop', child: UiText('shop')),
+                  DropdownMenuItem(value: 'van', child: UiText('van')),
+                ],
+                onChanged: (value) {
+                  if (value != null && value != location) {
+                    setState(() => location = value);
+                    load();
+                  }
+                },
+              ),
+              const SizedBox(height: 18),
+              if (openSession == null)
+                operationEmpty(
+                  context,
+                  Icons.point_of_sale_outlined,
+                  'No open cash session',
+                  'Enter the cash in the drawer before starting sales.',
+                )
+              else ...[
+                UiText(
+                  'Open cash session',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+                UiText(
+                  'Opened ${dateLabel(openSession!['opened'])}',
+                  style: const TextStyle(color: Color(0xFF71818A)),
+                ),
+                const SizedBox(height: 10),
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(18),
+                    child: Column(
+                      children: [
+                        totalRow('Opening cash', summary['opening']!),
+                        totalRow(
+                          'Sales and collections',
+                          summary['sales_receipts']!,
+                        ),
+                        totalRow(
+                          'Purchase refunds',
+                          summary['purchase_refunds']!,
+                        ),
+                        totalRow('Expenses', -summary['expenses']!),
+                        totalRow(
+                          'Supplier payments',
+                          -summary['supplier_payments']!,
+                        ),
+                        totalRow('Sales refunds', -summary['sales_refunds']!),
+                        const Divider(),
+                        totalRow(
+                          'Expected cash',
+                          summary['expected']!,
+                          bold: true,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+              FilledButton.icon(
+                onPressed: openSession == null ? open : close,
+                icon: Icon(
+                  openSession == null ? Icons.lock_open : Icons.lock_outline,
+                ),
+                label: UiText(
+                  openSession == null
+                      ? 'Open cash session'
+                      : 'Count and close cash',
+                ),
+              ),
+              const SizedBox(height: 12),
+              const UiText(
+                'Cashbook totals use all recorded payments and refunds as cash. Card payments are not tracked separately.',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Color(0xFF71818A),
+                  height: 1.4,
+                ),
+              ),
+              const SizedBox(height: 26),
+              Row(
+                children: [
+                  Expanded(
+                    child: UiText(
+                      'Closing history',
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                  ),
+                  if (history.isNotEmpty)
+                    TextButton.icon(
+                      onPressed: exporting ? null : export,
+                      icon: const Icon(Icons.download),
+                      label: const UiText('Export CSV'),
+                    ),
+                ],
+              ),
+              if (history.isEmpty) const UiText('No closed cash sessions yet'),
+              for (final session in history)
+                Card(
+                  child: ListTile(
+                    title: UiText(
+                      'Variance ${money((session['actual'] as int) - (session['expected'] as int))}',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        color: session['actual'] == session['expected']
+                            ? teal
+                            : const Color(0xFFA96E1D),
+                      ),
+                    ),
+                    subtitle: UiText(
+                      '${dateLabel(session['opened'])} → ${dateLabel(session['closed'])}',
+                    ),
+                    trailing: UiText(
+                      money(session['actual'] as int),
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+  );
+}
+
 class ReportsScreen extends StatefulWidget {
   final PosStore store;
   const ReportsScreen({super.key, required this.store});

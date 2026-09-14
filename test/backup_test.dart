@@ -37,6 +37,7 @@ void main() {
     );
     await source.saveSettings('Riyadh shop', 1500);
     await source.saveLanguage('ar');
+    await source.startCashSession('shop', 500);
     await source.addProduct('Water', 'W01', 105, 12, 'shop', cost: 40);
     await source.addCustomer('Customer', '+966500000000', 'Riyadh');
     await source.addSupplier('Supplier', '', '', 'Riyadh');
@@ -48,6 +49,7 @@ void main() {
     await source.returnSale(sale, {line: 1});
     await source.returnSale(sale, {line: 2});
     await source.addExpense('Fuel', 'Van delivery', 1200, 'van');
+    await source.closeCashSession(1, 500, 'Counted');
     await target.addProduct('Existing target item', 'OLD01', 100, 2, 'shop');
   });
   tearDown(() async {
@@ -62,6 +64,7 @@ void main() {
       final backup = PosBackup.decode(await source.exportBackup());
       expect(backup.business, 'Riyadh shop');
       expect(backup.count('sales'), 1);
+      expect(backup.count('cash_sessions'), 1);
       await target.restoreBackup(backup);
       for (final table in backupTables) {
         expect(
@@ -108,6 +111,16 @@ void main() {
       );
     },
   );
+
+  test('schema 4 backup restores with an empty cashbook', () async {
+    final legacy = editBackup(await source.exportBackup(), (json) {
+      json['database_version'] = 4;
+      json['payload']['tables'].remove('cash_sessions');
+    });
+    await target.restoreBackup(PosBackup.decode(legacy));
+    expect(await target.db.query('cash_sessions'), isEmpty);
+    expect((await target.products()).single['name'], 'Water');
+  });
 
   test(
     'missing tables and invalid settings cannot be previewed as valid',

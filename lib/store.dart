@@ -52,7 +52,7 @@ class PosStore {
     final database = await f.openDatabase(
       path ?? p.join(await f.getDatabasesPath(), 'rihla.db'),
       options: OpenDatabaseOptions(
-        version: 4,
+        version: 5,
         onConfigure: (db) async {
           await db.execute('PRAGMA foreign_keys = ON');
         },
@@ -102,6 +102,7 @@ class PosStore {
           await _createOperations(db);
           await _upgradeTrading(db);
           await _upgradeBarcodes(db);
+          await _createCashbook(db);
         },
         onUpgrade: (db, oldVersion, newVersion) async {
           if (oldVersion < 2) {
@@ -124,6 +125,7 @@ class PosStore {
           }
           if (oldVersion < 3) await _upgradeTrading(db);
           if (oldVersion < 4) await _upgradeBarcodes(db);
+          if (oldVersion < 5) await _createCashbook(db);
         },
       ),
     );
@@ -158,6 +160,23 @@ class PosStore {
     );
     await db.execute(
       "CREATE UNIQUE INDEX product_barcode_unique ON products(barcode) WHERE barcode != ''",
+    );
+  }
+
+  static Future<void> _createCashbook(DatabaseExecutor db) async {
+    await db.execute('''CREATE TABLE IF NOT EXISTS cash_sessions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, opened TEXT NOT NULL,
+      closed TEXT, location TEXT NOT NULL, opening INTEGER NOT NULL CHECK(opening >= 0),
+      sales_receipts INTEGER NOT NULL DEFAULT 0 CHECK(sales_receipts >= 0),
+      purchase_refunds INTEGER NOT NULL DEFAULT 0 CHECK(purchase_refunds >= 0),
+      expenses INTEGER NOT NULL DEFAULT 0 CHECK(expenses >= 0),
+      supplier_payments INTEGER NOT NULL DEFAULT 0 CHECK(supplier_payments >= 0),
+      sales_refunds INTEGER NOT NULL DEFAULT 0 CHECK(sales_refunds >= 0),
+      expected INTEGER NOT NULL DEFAULT 0,
+      actual INTEGER CHECK(actual >= 0), note TEXT NOT NULL DEFAULT '')''');
+    await db.execute(
+      '''CREATE UNIQUE INDEX IF NOT EXISTS cash_session_open_location
+      ON cash_sessions(location) WHERE closed IS NULL''',
     );
   }
 
@@ -863,6 +882,185 @@ class PosStore {
         'refund': refund,
       });
       return refund;
+    });
+  }
+
+  Future<DbRow?> openCashSession(String location) async {
+    _location(location);
+    final rows = await db.query(
+      'cash_sessions',
+      where: 'location=? AND closed IS NULL',
+      whereArgs: [location],
+      limit: 1,
+    );
+    return rows.isEmpty ? null : rows.single;
+  }
+
+  Future<List<DbRow>> cashSessionHistory(String location) {
+    _location(location);
+    return db.query(
+      'cash_sessions',
+      where: 'location=? AND closed IS NOT NULL',
+      whereArgs: [location],
+      orderBy: 'id DESC',
+    );
+  }
+
+  Future<int> startCashSession(String location, int opening) async {
+    _location(location);
+    if (opening < 0 || opening > 9999999999) {
+      throw const FormatException('Enter a valid opening cash amount.');
+    }
+    try {
+      return await db.transaction((tx) async {
+        if ((await tx.query(
+          'cash_sessions',
+          columns: ['id'],
+          where: 'location=? AND closed IS NULL',
+          whereArgs: [location],
+          limit: 1,
+        )).isNotEmpty) {
+          throw const FormatException('Close the current cash session first.');
+        }
+        return tx.insert('cash_sessions', {
+          'opened': DateTime.now().toUtc().toIso8601String(),
+          'location': location,
+          'opening': opening,
+          'expected': opening,
+        });
+      });
+    } on DatabaseException {
+      throw const FormatException('Close the current cash session first.');
+    }
+  }
+
+  static Future<Map<String, int>> _cashTotals(
+    DatabaseExecutor executor,
+    String location,
+    String opened,
+    String until,
+  ) async {
+    Future<int> value(String sql) async =>
+        ((await executor.rawQuery(sql, [
+                  location,
+                  opened,
+                  until,
+                ])).single['value']
+                as num)
+            .toInt();
+    return {
+      'sales_receipts': await value(
+        '''SELECT COALESCE(SUM(p.amount),0) value FROM payments p
+           JOIN sales s ON s.id=p.sale_id
+           WHERE s.location=? AND p.created>=? AND p.created<?''',
+      ),
+      'purchase_refunds': await value(
+        '''SELECT COALESCE(SUM(r.refund),0) value FROM purchase_returns r
+           JOIN purchases p ON p.id=r.purchase_id
+           WHERE p.location=? AND r.created>=? AND r.created<?''',
+      ),
+      'expenses': await value(
+        '''SELECT COALESCE(SUM(amount),0) value FROM expenses
+           WHERE location=? AND created>=? AND created<?''',
+      ),
+      'supplier_payments': await value(
+        '''SELECT COALESCE(SUM(sp.amount),0) value FROM supplier_payments sp
+           JOIN purchases p ON p.id=sp.purchase_id
+           WHERE p.location=? AND sp.created>=? AND sp.created<?''',
+      ),
+      'sales_refunds': await value(
+        '''SELECT COALESCE(SUM(r.refund),0) value FROM sale_returns r
+           JOIN sales s ON s.id=r.sale_id
+           WHERE s.location=? AND r.created>=? AND r.created<?''',
+      ),
+    };
+  }
+
+  Future<Map<String, int>> cashSessionSummary(int sessionId) => db.transaction((
+    tx,
+  ) async {
+    final rows = await tx.query(
+      'cash_sessions',
+      where: 'id=?',
+      whereArgs: [sessionId],
+      limit: 1,
+    );
+    if (rows.isEmpty) throw const FormatException('Cash session not found.');
+    final session = rows.single;
+    if (session['closed'] != null) {
+      return {
+        for (final key in [
+          'opening',
+          'sales_receipts',
+          'purchase_refunds',
+          'expenses',
+          'supplier_payments',
+          'sales_refunds',
+          'expected',
+        ])
+          key: session[key] as int,
+      };
+    }
+    final totals = await _cashTotals(
+      tx,
+      session['location'] as String,
+      session['opened'] as String,
+      DateTime.now().toUtc().toIso8601String(),
+    );
+    return {
+      'opening': session['opening'] as int,
+      ...totals,
+      'expected':
+          (session['opening'] as int) +
+          totals['sales_receipts']! +
+          totals['purchase_refunds']! -
+          totals['expenses']! -
+          totals['supplier_payments']! -
+          totals['sales_refunds']!,
+    };
+  });
+
+  Future<void> closeCashSession(int sessionId, int actual, String note) async {
+    if (actual < 0 || actual > 9999999999) {
+      throw const FormatException('Enter the actual cash counted.');
+    }
+    await db.transaction((tx) async {
+      final rows = await tx.query(
+        'cash_sessions',
+        where: 'id=? AND closed IS NULL',
+        whereArgs: [sessionId],
+        limit: 1,
+      );
+      if (rows.isEmpty) {
+        throw const FormatException('This cash session is already closed.');
+      }
+      final session = rows.single;
+      final closed = DateTime.now().toUtc().toIso8601String();
+      final totals = await _cashTotals(
+        tx,
+        session['location'] as String,
+        session['opened'] as String,
+        closed,
+      );
+      final expected =
+          (session['opening'] as int) +
+          totals['sales_receipts']! +
+          totals['purchase_refunds']! -
+          totals['expenses']! -
+          totals['supplier_payments']! -
+          totals['sales_refunds']!;
+      await tx.update(
+        'cash_sessions',
+        {
+          'closed': closed,
+          ...totals,
+          'expected': expected,
+          'actual': actual,
+          'note': note.trim(),
+        },
+        where: 'id=?',
+        whereArgs: [sessionId],
+      );
     });
   }
 

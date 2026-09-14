@@ -28,4 +28,29 @@ void main() {
     expect(csv, contains('"Net sales","12.34"'));
     expect(csv, contains('"Profit after expenses","3.00"'));
   });
+
+  test('cashbook CSV contains closing amounts and variance', () {
+    final bytes = cashbookCsv(
+      [
+        {
+          'opened': '2026-09-14T06:00:00.000Z',
+          'closed': '2026-09-14T14:00:00.000Z',
+          'opening': 1000,
+          'sales_receipts': 500,
+          'purchase_refunds': 0,
+          'expenses': 100,
+          'supplier_payments': 200,
+          'sales_refunds': 50,
+          'expected': 1150,
+          'actual': 1100,
+        },
+      ],
+      location: 'shop',
+      translate: (value) => value,
+    );
+    final csv = utf8.decode(bytes);
+    expect(csv, contains('"Daily cashbook"'));
+    expect(csv, contains('"Expected cash","Actual cash","Variance"'));
+    expect(csv, contains('"11.50","11.00","-0.50"'));
+  });
 }

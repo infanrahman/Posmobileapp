@@ -166,6 +166,7 @@ void main() {
     final legacy = editBackup(await store.exportBackup(), (j) {
       j['database_version'] = 2;
       final tables = j['payload']['tables'] as Map;
+      tables.remove('cash_sessions');
       for (final row in tables['products']) {
         row.remove('barcode');
       }
@@ -202,6 +203,7 @@ void main() {
     await store.addPurchase({1: (quantity: 2, cost: 40)}, 'van', 1, 0);
     await store.saveLanguage('ar');
     final report = await store.report();
+    await store.db.execute('DROP TABLE cash_sessions');
     await store.db.execute('DROP TABLE purchase_returns');
     await store.db.execute('DROP INDEX product_barcode_unique');
     await store.db.execute('ALTER TABLE products DROP COLUMN barcode');
@@ -217,7 +219,7 @@ void main() {
       factory: databaseFactoryFfi,
       path: '${directory.path}/db',
     );
-    expect(await store.db.getVersion(), 4);
+    expect(await store.db.getVersion(), 5);
     expect(await store.report(), report);
     expect((await store.settings())['language'], 'ar');
     expect((await store.sales()).single['discount'], 0);
